@@ -1,0 +1,32 @@
+__pycache__/
+*.pyc
+
+# DSSAT outputs
+*.OUT
+*.LST
+LUN.LST
+OUTPUT.LST
+OVERVIEW.OUT
+WARNING.OUT
+
+# PEST/PEST++ artifacts
+*.rei
+*.rec
+*.log
+*.jco
+*.jcb
+*.sen
+*.par
+*.parb
+*.svd
+*.cov
+*.csv
+run.info
+
+# Local binaries and archives
+*.exe
+*.zip
+*.tar.gz
+
+# Sandbox/work dirs
+pestpp_*/

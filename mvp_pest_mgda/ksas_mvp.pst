@@ -1,0 +1,30 @@
+pcf
+* control data
+             restart          estimation
+         2         2         1         0         2
+         1         1              single               point         1
+   2.000000E+01  -3.000000E+00   3.000000E-01   1.000000E-02        -7
+   1.000000E+01   1.000000E+01   1.000000E-03
+   1.000000E-01
+        -1   1.000000E-02         3         3   1.000000E-02         3
+         0         0         0
+* singular value decomposition
+         1
+  10000000    1.000000E-06
+1
+* parameter groups
+g_sh2o                 absolute              5.0000000000E-02      0.0 switch                2.0000000000E+00      parabolic             1.0000000000E-05      5.0000000000E-01      smaller              
+* parameter data
+sh2o_15               none                  factor                2.0375900000E-01      5.0000000000E-02      4.0000000000E-01      g_sh2o                1.0000000000E+00      0.0000000000E+00      1          
+sh2o_30               none                  factor                4.0000000000E-01      5.0000000000E-02      4.0000000000E-01      g_sh2o                1.0000000000E+00      0.0000000000E+00      1          
+* observation groups
+obs_yield            
+obs_laix             
+* observation data
+hwam                  2.3170000000E+03      1.0000000000E+00      obs_yield            
+laix                  1.0000000000E+00      1.0000000000E+00      obs_laix             
+* model command line
+model.bat
+* model input/output
+params.tpl params.dat
+pest_out.ins pest_out.dat
