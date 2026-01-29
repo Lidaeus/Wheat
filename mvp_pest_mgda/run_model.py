@@ -93,14 +93,18 @@ def _extract_eval_metrics(eval_path: Path) -> dict[str, float]:
 
 def main() -> None:
     cwd = Path.cwd()
-    dssat_dir = Path(__file__).resolve().parents[1]
     params_path = cwd / "params.dat"
     params = _read_params(params_path)
 
-    base = cwd / "KSAS8101_base.WHX"
-    live = dssat_dir / "KSAS8101.WHX"
+    dssat_dir = Path(__file__).resolve().parents[1]
+    base = Path(__file__).resolve().parent / "KSAS8101_base.WHX"
     if not base.exists():
-        base.write_text(live.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8")
+        raise FileNotFoundError(f"Missing base FileX template: {base}")
+
+    live_filex = dssat_dir / "KSAS8101.WHX"
+    if not live_filex.exists():
+        raise FileNotFoundError(f"Missing live FileX: {live_filex}")
+    live_original = live_filex.read_text(encoding="utf-8", errors="ignore")
 
     for p in ["Evaluate.OUT", "Summary.OUT", "WARNING.OUT"]:
         fp = dssat_dir / p
@@ -111,12 +115,33 @@ def main() -> None:
         15: params.get("sh2o_15", 0.205),
         30: params.get("sh2o_30", 0.170),
     }
-    _rewrite_initial_sh2o(base, live, sh2o_by_icbl)
     try:
+        _rewrite_initial_sh2o(base, live_filex, sh2o_by_icbl)
         _run_dssat("KSAS8101.WHX", 1, dssat_dir)
-        metrics = _extract_eval_metrics(dssat_dir / "Evaluate.OUT")
+        eval_path = dssat_dir / "Evaluate.OUT"
+        metrics = _extract_eval_metrics(eval_path)
+        (cwd / "Evaluate.OUT").write_text(
+            eval_path.read_text(encoding="utf-8", errors="ignore"),
+            encoding="utf-8",
+        )
+        summary_path = dssat_dir / "Summary.OUT"
+        if summary_path.exists():
+            (cwd / "Summary.OUT").write_text(
+                summary_path.read_text(encoding="utf-8", errors="ignore"),
+                encoding="utf-8",
+            )
+        warning_path = dssat_dir / "WARNING.OUT"
+        if warning_path.exists():
+            (cwd / "WARNING.OUT").write_text(
+                warning_path.read_text(encoding="utf-8", errors="ignore"),
+                encoding="utf-8",
+            )
     finally:
-        _rewrite_initial_sh2o(base, live, {15: 0.205, 30: 0.170})
+        live_filex.write_text(live_original, encoding="utf-8")
+        for p in ["Evaluate.OUT", "Summary.OUT", "WARNING.OUT"]:
+            fp = dssat_dir / p
+            if fp.exists():
+                fp.unlink()
 
     (cwd / "pest_out.dat").write_text(
         f"hwam {metrics['hwam']:.3f}\nlaix {metrics['laix']:.3f}\n",

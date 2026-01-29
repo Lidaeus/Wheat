@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from shutil import copy2
 from pathlib import Path
 
 import pyemu
@@ -37,12 +38,27 @@ def _extract_measured(eval_path: Path) -> dict[str, float]:
     return {"hwam": float(row["HWAMM"]), "laix": float(row["LAIXM"]) }
 
 
+def _ensure_case_files(case_dir: Path, template_dir: Path) -> None:
+    case_dir.mkdir(parents=True, exist_ok=True)
+    for name in ["params.dat", "params.tpl", "pest_out.ins"]:
+        dst = case_dir / name
+        if dst.exists():
+            continue
+        src = template_dir / name
+        if not src.exists():
+            raise FileNotFoundError(f"Missing template file: {src}")
+        copy2(src, dst)
+
+
 def main() -> None:
     cwd = Path.cwd()
-    dssat_dir = Path(__file__).resolve().parents[1]
+    template_dir = Path(__file__).resolve().parent
+    _ensure_case_files(cwd, template_dir)
 
-    subprocess.run(["python", "run_model.py"], cwd=str(cwd), check=True)
-    obs = _extract_measured(dssat_dir / "Evaluate.OUT")
+    run_model_path = template_dir / "run_model.py"
+
+    subprocess.run(["python", str(run_model_path)], cwd=str(cwd), check=True)
+    obs = _extract_measured(cwd / "Evaluate.OUT")
     params = _read_params(cwd / "params.dat")
 
     pst = pyemu.utils.helpers.pst_from_io_files(
@@ -53,7 +69,7 @@ def main() -> None:
         pst_filename="ksas_mvp.pst",
     )
 
-    pst.model_commandline = ["python run_model.py"]
+    pst.model_command = [f'python "{run_model_path}"']
     pst.control_data.noptmax = -1
     pst.control_data.pestmode = "estimation"
 
