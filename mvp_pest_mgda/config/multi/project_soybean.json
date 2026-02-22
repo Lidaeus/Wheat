@@ -1,0 +1,112 @@
+{
+  "paths": {
+    "dssat_case_dir": "C:\\DSSAT48\\Soybean",
+    "wha_path": "C:\\DSSAT48\\Soybean\\CLMO8501.SBA",
+    "wht_path": "C:\\DSSAT48\\Soybean\\CLMO8501.SBT",
+    "obs_a_path": "C:\\DSSAT48\\Soybean\\CLMO8501.SBA",
+    "obs_t_path": "C:\\DSSAT48\\Soybean\\CLMO8501.SBT",
+    "cul_path": "C:\\DSSAT48\\Genotype\\SBGRO048.CUL",
+    "dssat_exe": "C:\\DSSAT48\\DSCSM048.EXE"
+  },
+  "scenario": {
+    "filex": "CLMO8501.SBX",
+    "base_filex": "CLMO8501.SBX",
+    "trts": [
+      1,
+      2
+    ]
+  },
+  "adapter": {
+    "wth_path": "",
+    "sol_path": "",
+    "wth_updates": [],
+    "sol_updates": []
+  },
+  "split": {
+    "mode": "ratio",
+    "valid_ratio": 0.2,
+    "seed": 20260210,
+    "train_trts": [],
+    "valid_trts": []
+  },
+  "params": {
+    "bounds": {
+      "ppsen": [
+        9.87,
+        18.330000000000002,
+        "g_cul"
+      ],
+      "em-fl": [
+        0.1197,
+        0.22230000000000003,
+        "g_cul"
+      ],
+      "fl-sh": [
+        11.76,
+        21.840000000000003,
+        "g_cul"
+      ],
+      "fl-sd": [
+        5.46,
+        10.14,
+        "g_cul"
+      ],
+      "sd-pm": [
+        9.66,
+        17.94,
+        "g_cul"
+      ],
+      "lfmax": [
+        18.2,
+        33.800000000000004,
+        "g_cul"
+      ]
+    },
+    "groups": {
+      "g_cul": {
+        "inctyp": "relative",
+        "derinc": 0.05
+      }
+    }
+  },
+  "observations": {
+    "allow_missing_obs_files": true,
+    "groups": {
+      "obs_yield": {
+        "patterns": [
+          "hwam_"
+        ],
+        "weight": 1.0
+      },
+      "obs_laix": {
+        "patterns": [
+          "laix_"
+        ],
+        "weight": 1.0
+      },
+      "obs_laid": {
+        "patterns": [
+          "laid_"
+        ],
+        "weight": 1.0
+      },
+      "obs_swad": {
+        "patterns": [
+          "swad_"
+        ],
+        "weight": 1.0
+      }
+    },
+    "weights": {}
+  },
+  "metrics": {
+    "yield_var": "HWAM",
+    "laix_var": "LAIX",
+    "t_vars": [
+      "LAID",
+      "LWAD",
+      "SWAD"
+    ]
+  },
+  "crop_family": "Soybean"
+}

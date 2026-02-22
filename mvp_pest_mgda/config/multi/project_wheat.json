@@ -1,0 +1,116 @@
+{
+  "paths": {
+    "dssat_case_dir": "C:\\DSSAT48\\Wheat",
+    "wha_path": "C:\\DSSAT48\\Wheat\\KSAS8101.WHA",
+    "wht_path": "C:\\DSSAT48\\Wheat\\KSAS8101.WHT",
+    "obs_a_path": "C:\\DSSAT48\\Wheat\\KSAS8101.WHA",
+    "obs_t_path": "C:\\DSSAT48\\Wheat\\KSAS8101.WHT",
+    "cul_path": "C:\\DSSAT48\\Genotype\\WHCER048.CUL",
+    "dssat_exe": "C:\\DSSAT48\\DSCSM048.EXE"
+  },
+  "scenario": {
+    "filex": "KSAS8101.WHX",
+    "base_filex": "KSAS8101.WHX",
+    "trts": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ]
+  },
+  "adapter": {
+    "wth_path": "",
+    "sol_path": "",
+    "wth_updates": [],
+    "sol_updates": []
+  },
+  "split": {
+    "mode": "ratio",
+    "valid_ratio": 0.2,
+    "seed": 20260210,
+    "train_trts": [],
+    "valid_trts": []
+  },
+  "params": {
+    "bounds": {
+      "p5": [
+        353.5,
+        656.5,
+        "g_cul"
+      ],
+      "p1v": [
+        34.202,
+        63.518,
+        "g_cul"
+      ],
+      "p1d": [
+        63.217,
+        117.403,
+        "g_cul"
+      ],
+      "phint": [
+        11.472999999999999,
+        21.307000000000002,
+        "g_cul"
+      ],
+      "g1": [
+        24.625999999999998,
+        45.734,
+        "g_cul"
+      ],
+      "g2": [
+        15.161999999999999,
+        28.158,
+        "g_cul"
+      ]
+    },
+    "groups": {
+      "g_cul": {
+        "inctyp": "relative",
+        "derinc": 0.05
+      }
+    }
+  },
+  "observations": {
+    "allow_missing_obs_files": true,
+    "groups": {
+      "obs_yield": {
+        "patterns": [
+          "hwam_"
+        ],
+        "weight": 1.0
+      },
+      "obs_laix": {
+        "patterns": [
+          "laix_"
+        ],
+        "weight": 1.0
+      },
+      "obs_laid": {
+        "patterns": [
+          "laid_"
+        ],
+        "weight": 1.0
+      },
+      "obs_swad": {
+        "patterns": [
+          "swad_"
+        ],
+        "weight": 1.0
+      }
+    },
+    "weights": {}
+  },
+  "metrics": {
+    "yield_var": "HWAM",
+    "laix_var": "LAIX",
+    "t_vars": [
+      "LAID",
+      "LWAD",
+      "SWAD"
+    ]
+  },
+  "crop_family": "Wheat"
+}

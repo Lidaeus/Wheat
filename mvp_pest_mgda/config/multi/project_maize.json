@@ -1,0 +1,118 @@
+{
+  "paths": {
+    "dssat_case_dir": "C:\\DSSAT48\\Maize",
+    "wha_path": "C:\\DSSAT48\\Maize\\BRPI0202.MZA",
+    "wht_path": "C:\\DSSAT48\\Maize\\BRPI0202.MZT",
+    "obs_a_path": "C:\\DSSAT48\\Maize\\BRPI0202.MZA",
+    "obs_t_path": "C:\\DSSAT48\\Maize\\BRPI0202.MZT",
+    "cul_path": "C:\\DSSAT48\\Genotype\\MZCER048.CUL",
+    "dssat_exe": "C:\\DSSAT48\\DSCSM048.EXE"
+  },
+  "scenario": {
+    "filex": "BRPI0202.MZX",
+    "base_filex": "BRPI0202.MZX",
+    "trts": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  "adapter": {
+    "wth_path": "",
+    "sol_path": "",
+    "wth_updates": [],
+    "sol_updates": []
+  },
+  "split": {
+    "mode": "ratio",
+    "valid_ratio": 0.2,
+    "seed": 20260210,
+    "train_trts": [],
+    "valid_trts": []
+  },
+  "params": {
+    "bounds": {
+      "p1": [
+        137.2,
+        254.8,
+        "g_cul"
+      ],
+      "p2": [
+        0.35,
+        0.65,
+        "g_cul"
+      ],
+      "p5": [
+        530.6,
+        985.4,
+        "g_cul"
+      ],
+      "phint": [
+        28.0,
+        52.0,
+        "g_cul"
+      ],
+      "g2": [
+        581.0,
+        1079.0,
+        "g_cul"
+      ],
+      "g3": [
+        3.5699999999999994,
+        6.63,
+        "g_cul"
+      ]
+    },
+    "groups": {
+      "g_cul": {
+        "inctyp": "relative",
+        "derinc": 0.05
+      }
+    }
+  },
+  "observations": {
+    "allow_missing_obs_files": true,
+    "groups": {
+      "obs_yield": {
+        "patterns": [
+          "hwam_"
+        ],
+        "weight": 1.0
+      },
+      "obs_laix": {
+        "patterns": [
+          "laix_"
+        ],
+        "weight": 1.0
+      },
+      "obs_laid": {
+        "patterns": [
+          "laid_"
+        ],
+        "weight": 1.0
+      },
+      "obs_swad": {
+        "patterns": [
+          "swad_"
+        ],
+        "weight": 1.0
+      }
+    },
+    "weights": {}
+  },
+  "metrics": {
+    "yield_var": "HWAM",
+    "laix_var": "LAIX",
+    "t_vars": [
+      "LAID",
+      "LWAD",
+      "SWAD"
+    ]
+  },
+  "crop_family": "Maize"
+}

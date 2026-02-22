@@ -1,0 +1,54 @@
+{
+  "paths": {
+    "dssat_case_dir": "C:\\DSSAT48\\Wheat",
+    "wha_path": "C:\\DSSAT48\\Wheat\\SWSW7501.WHA",
+    "wht_path": "C:\\DSSAT48\\Wheat\\SWSW7501.WHT",
+    "wh_cul_path": "C:\\DSSAT48\\Genotype\\WHCER048.CUL",
+    "dssat_exe": "C:\\DSSAT48\\DSCSM048.EXE"
+  },
+  "scenario": {
+    "filex": "SWSW7501.WHX",
+    "base_filex": "SWSW7501.WHX",
+    "trts": []
+  },
+  "adapter": {
+    "wth_path": "",
+    "sol_path": "",
+    "wth_updates": [],
+    "sol_updates": []
+  },
+  "split": {
+    "mode": "ratio",
+    "valid_ratio": 0.2,
+    "seed": 20260129,
+    "train_trts": [],
+    "valid_trts": []
+  },
+  "params": {
+    "bounds": {
+      "sh2o_15": [0.18, 0.28, "g_sh2o"],
+      "sh2o_30": [0.20, 0.30, "g_sh2o"],
+      "p1v": [6.53, 12.13, "g_cul_pheno"],
+      "p1d": [9.18, 17.06, "g_cul_pheno"],
+      "p5": [231.98, 430.82, "g_cul_pheno"],
+      "phint": [60.2, 111.8, "g_cul_pheno"],
+      "g1": [10.0, 15.74, "g_cul_grain"],
+      "g2": [44.44, 80.0, "g_cul_grain"],
+      "g3": [1.55, 2.88, "g_cul_grain"]
+    },
+    "groups": {
+      "g_sh2o": {"inctyp": "absolute", "derinc": 0.02},
+      "g_cul_pheno": {"inctyp": "relative", "derinc": 0.03},
+      "g_cul_grain": {"inctyp": "relative", "derinc": 0.05}
+    }
+  },
+  "observations": {
+    "groups": {
+      "obs_yield": {"patterns": ["hwam_"], "weight": 1.0},
+      "obs_laix": {"patterns": ["laix_"], "weight": 1.0},
+      "obs_laid": {"patterns": ["laid_"], "weight": 1.0},
+      "obs_swad": {"patterns": ["swad_"], "weight": 1.0}
+    },
+    "weights": {}
+  }
+}

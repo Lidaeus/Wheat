@@ -1,0 +1,116 @@
+{
+  "paths": {
+    "dssat_case_dir": "C:\\DSSAT48\\Rice",
+    "wha_path": "C:\\DSSAT48\\Rice\\DTSP8502.RIA",
+    "wht_path": "C:\\DSSAT48\\Rice\\DTSP8502.RIT",
+    "obs_a_path": "C:\\DSSAT48\\Rice\\DTSP8502.RIA",
+    "obs_t_path": "C:\\DSSAT48\\Rice\\DTSP8502.RIT",
+    "cul_path": "C:\\DSSAT48\\Genotype\\RICER048.CUL",
+    "dssat_exe": "C:\\DSSAT48\\DSCSM048.EXE"
+  },
+  "scenario": {
+    "filex": "DTSP8502.RIX",
+    "base_filex": "DTSP8502.RIX",
+    "trts": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ]
+  },
+  "adapter": {
+    "wth_path": "",
+    "sol_path": "",
+    "wth_updates": [],
+    "sol_updates": []
+  },
+  "split": {
+    "mode": "ratio",
+    "valid_ratio": 0.2,
+    "seed": 20260210,
+    "train_trts": [],
+    "valid_trts": []
+  },
+  "params": {
+    "bounds": {
+      "p2o": [
+        271.17999999999995,
+        503.62,
+        "g_cul"
+      ],
+      "p2r": [
+        370.02,
+        687.1800000000001,
+        "g_cul"
+      ],
+      "p5": [
+        109.55,
+        203.45000000000002,
+        "g_cul"
+      ],
+      "phint": [
+        0.7,
+        1.3,
+        "g_cul"
+      ],
+      "g1": [
+        8.847999999999999,
+        16.432000000000002,
+        "g_cul"
+      ],
+      "g2": [
+        36.855,
+        68.44500000000001,
+        "g_cul"
+      ]
+    },
+    "groups": {
+      "g_cul": {
+        "inctyp": "relative",
+        "derinc": 0.05
+      }
+    }
+  },
+  "observations": {
+    "allow_missing_obs_files": true,
+    "groups": {
+      "obs_yield": {
+        "patterns": [
+          "hwam_"
+        ],
+        "weight": 1.0
+      },
+      "obs_laix": {
+        "patterns": [
+          "laix_"
+        ],
+        "weight": 1.0
+      },
+      "obs_laid": {
+        "patterns": [
+          "laid_"
+        ],
+        "weight": 1.0
+      },
+      "obs_swad": {
+        "patterns": [
+          "swad_"
+        ],
+        "weight": 1.0
+      }
+    },
+    "weights": {}
+  },
+  "metrics": {
+    "yield_var": "HWAM",
+    "laix_var": "LAIX",
+    "t_vars": [
+      "LAID",
+      "LWAD",
+      "SWAD"
+    ]
+  },
+  "crop_family": "Rice"
+}

@@ -1,0 +1,53 @@
+{
+  "paths": {
+    "dssat_case_dir": "C:\\DSSAT48\\Sugarcane",
+    "obs_a_path": "C:\\DSSAT48\\Sugarcane\\SATO8902.SCA",
+    "obs_t_path": "C:\\DSSAT48\\Sugarcane\\__skip__.SCT",
+    "cul_path": "C:\\DSSAT48\\Genotype\\SCCAN048.CUL",
+    "dssat_exe": "C:\\DSSAT48\\DSCSM048.EXE"
+  },
+  "scenario": {
+    "filex": "SATO8902.SCX",
+    "base_filex": "SATO8902.SCX",
+    "trts": [1, 2, 3, 4, 5, 6, 7, 8]
+  },
+  "adapter": {
+    "wth_path": "",
+    "sol_path": "",
+    "wth_updates": [],
+    "sol_updates": []
+  },
+  "metrics": {
+    "yield_var": "HWAH",
+    "laix_var": ""
+  },
+  "split": {
+    "mode": "ratio",
+    "valid_ratio": 0.2,
+    "seed": 20260205,
+    "train_trts": [],
+    "valid_trts": []
+  },
+  "params": {
+    "bounds": {
+      "maxparce": [5.0, 7.0, "g_cul_growth"],
+      "stkpfmax": [0.6, 0.8, "g_cul_growth"],
+      "suca": [0.5, 0.7, "g_cul_growth"],
+      "lfmax": [10.0, 13.0, "g_cul_canopy"],
+      "pi1": [50.0, 90.0, "g_cul_pheno"],
+      "pi2": [107.0, 170.0, "g_cul_pheno"],
+      "chupibase": [700.0, 1200.0, "g_cul_pheno"]
+    },
+    "groups": {
+      "g_cul_growth": {"inctyp": "relative", "derinc": 0.03},
+      "g_cul_canopy": {"inctyp": "relative", "derinc": 0.05},
+      "g_cul_pheno": {"inctyp": "relative", "derinc": 0.03}
+    }
+  },
+  "observations": {
+    "groups": {
+      "obs_yield": {"patterns": ["hwah_"], "weight": 1.0}
+    },
+    "weights": {}
+  }
+}

@@ -31,3 +31,10 @@ run.info
 # Sandbox/work dirs
 pestpp_*/
 mvp_pest_mgda/_runs/
+mvp_pest_mgda/_work/
+mvp_pest_mgda/runs/_runs/
+mvp_pest_mgda/runs/
+mvp_pest_mgda/work/
+mvp_pest_mgda/data/
+mvp_pest_mgda/dssat_case/
+mvp_pest_mgda/dssat_trts.txt

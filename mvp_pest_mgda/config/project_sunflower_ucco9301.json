@@ -1,0 +1,49 @@
+{
+  "paths": {
+    "dssat_case_dir": "C:\\DSSAT48\\Sunflower",
+    "obs_a_path": "C:\\DSSAT48\\Sunflower\\UCCO9301.SUA",
+    "cul_path": "C:\\DSSAT48\\Genotype\\SUGRO048.CUL",
+    "dssat_exe": "C:\\DSSAT48\\DSCSM048.EXE"
+  },
+  "scenario": {
+    "filex": "UCCO9301.SUX",
+    "base_filex": "UCCO9301.SUX",
+    "trts": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  },
+  "adapter": {
+    "wth_path": "",
+    "sol_path": "",
+    "wth_updates": [],
+    "sol_updates": []
+  },
+  "metrics": {
+    "yield_var": "HWAM",
+    "laix_var": ""
+  },
+  "split": {
+    "mode": "ratio",
+    "valid_ratio": 0.2,
+    "seed": 20260205,
+    "train_trts": [],
+    "valid_trts": []
+  },
+  "params": {
+    "bounds": {
+      "ppsen": [-0.09, -0.085, "g_cul_pheno"],
+      "slavr": [1.8, 2.2, "g_cul_growth"],
+      "xfrt": [0.7, 0.85, "g_cul_growth"],
+      "wtpsd": [0.05, 0.12, "g_cul_growth"],
+      "sfdur": [22.0, 26.0, "g_cul_pheno"]
+    },
+    "groups": {
+      "g_cul_pheno": {"inctyp": "relative", "derinc": 0.03},
+      "g_cul_growth": {"inctyp": "relative", "derinc": 0.05}
+    }
+  },
+  "observations": {
+    "groups": {
+      "obs_yield": {"patterns": ["hwam_"], "weight": 1.0}
+    },
+    "weights": {}
+  }
+}

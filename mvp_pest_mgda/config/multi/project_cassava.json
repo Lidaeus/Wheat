@@ -1,0 +1,89 @@
+{
+  "paths": {
+    "dssat_case_dir": "C:\\DSSAT48\\Cassava",
+    "wha_path": "C:\\DSSAT48\\Cassava\\CCPA7801.CSA",
+    "wht_path": "C:\\DSSAT48\\Cassava\\CCPA7801.CST",
+    "obs_a_path": "C:\\DSSAT48\\Cassava\\CCPA7801.CSA",
+    "obs_t_path": "C:\\DSSAT48\\Cassava\\CCPA7801.CST",
+    "cul_path": "C:\\DSSAT48\\Genotype\\CSCAS048.CUL",
+    "dssat_exe": "C:\\DSSAT48\\DSCSM048.EXE"
+  },
+  "scenario": {
+    "filex": "CCPA7801.CSX",
+    "base_filex": "CCPA7801.CSX",
+    "trts": [
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "adapter": {
+    "wth_path": "",
+    "sol_path": "",
+    "wth_updates": [],
+    "sol_updates": []
+  },
+  "split": {
+    "mode": "ratio",
+    "valid_ratio": 0.2,
+    "seed": 20260210,
+    "train_trts": [],
+    "valid_trts": []
+  },
+  "params": {
+    "bounds": {
+      "phint": [
+        11.899999999999999,
+        22.1,
+        "g_cul"
+      ]
+    },
+    "groups": {
+      "g_cul": {
+        "inctyp": "relative",
+        "derinc": 0.05
+      }
+    }
+  },
+  "observations": {
+    "allow_missing_obs_files": true,
+    "groups": {
+      "obs_yield": {
+        "patterns": [
+          "hwam_"
+        ],
+        "weight": 1.0
+      },
+      "obs_laix": {
+        "patterns": [
+          "laix_"
+        ],
+        "weight": 1.0
+      },
+      "obs_laid": {
+        "patterns": [
+          "laid_"
+        ],
+        "weight": 1.0
+      },
+      "obs_swad": {
+        "patterns": [
+          "swad_"
+        ],
+        "weight": 1.0
+      }
+    },
+    "weights": {}
+  },
+  "metrics": {
+    "yield_var": "HWAM",
+    "laix_var": "LAIX",
+    "t_vars": [
+      "LAID",
+      "LWAD",
+      "SWAD"
+    ]
+  },
+  "crop_family": "Cassava"
+}

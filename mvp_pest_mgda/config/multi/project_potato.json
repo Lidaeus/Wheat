@@ -1,0 +1,98 @@
+{
+  "paths": {
+    "dssat_case_dir": "C:\\DSSAT48\\Potato",
+    "wha_path": "C:\\DSSAT48\\Potato\\AUCB7001.PTA",
+    "wht_path": "C:\\DSSAT48\\Potato\\AUCB7001.PTT",
+    "obs_a_path": "C:\\DSSAT48\\Potato\\AUCB7001.PTA",
+    "obs_t_path": "C:\\DSSAT48\\Potato\\AUCB7001.PTT",
+    "cul_path": "C:\\DSSAT48\\Genotype\\PTSUB048.CUL",
+    "dssat_exe": "C:\\DSSAT48\\DSCSM048.EXE"
+  },
+  "scenario": {
+    "filex": "AUCB7001.PTX",
+    "base_filex": "AUCB7001.PTX",
+    "trts": [
+      1,
+      2,
+      3
+    ]
+  },
+  "adapter": {
+    "wth_path": "",
+    "sol_path": "",
+    "wth_updates": [],
+    "sol_updates": []
+  },
+  "split": {
+    "mode": "ratio",
+    "valid_ratio": 0.2,
+    "seed": 20260210,
+    "train_trts": [],
+    "valid_trts": []
+  },
+  "params": {
+    "bounds": {
+      "p2": [
+        0.25129999999999997,
+        0.4667,
+        "g_cul"
+      ],
+      "g2": [
+        1325.8,
+        2462.2000000000003,
+        "g_cul"
+      ],
+      "g3": [
+        17.57,
+        32.63,
+        "g_cul"
+      ]
+    },
+    "groups": {
+      "g_cul": {
+        "inctyp": "relative",
+        "derinc": 0.05
+      }
+    }
+  },
+  "observations": {
+    "allow_missing_obs_files": true,
+    "groups": {
+      "obs_yield": {
+        "patterns": [
+          "hwam_"
+        ],
+        "weight": 1.0
+      },
+      "obs_laix": {
+        "patterns": [
+          "laix_"
+        ],
+        "weight": 1.0
+      },
+      "obs_laid": {
+        "patterns": [
+          "laid_"
+        ],
+        "weight": 1.0
+      },
+      "obs_swad": {
+        "patterns": [
+          "swad_"
+        ],
+        "weight": 1.0
+      }
+    },
+    "weights": {}
+  },
+  "metrics": {
+    "yield_var": "HWAM",
+    "laix_var": "LAIX",
+    "t_vars": [
+      "LAID",
+      "LWAD",
+      "SWAD"
+    ]
+  },
+  "crop_family": "Potato"
+}
