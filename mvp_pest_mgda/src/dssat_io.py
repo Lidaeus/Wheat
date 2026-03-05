@@ -139,30 +139,47 @@ def pick_eval_value(row: dict[str, str], var_code: str, prefer_suffix: str = "S"
     if not vc:
         return None
     suf = str(prefer_suffix).strip().upper()
+    
+    # Priority list for yield fallbacks (Dry weight > Fresh weight)
+    yield_fallbacks = ["HWAM", "CWAM", "PRCM", "HWUM", "HWAH"]
+    is_yield = vc in yield_fallbacks or vc == "YIELD"
+    
+    # Base candidates list
+    base_vcs = yield_fallbacks if is_yield else [vc]
+    
     candidates: list[str] = []
-    if suf and not vc.endswith(suf):
-        candidates.append(vc + suf)
-    if vc != "S" and not vc.endswith("S"):
-        candidates.append(vc + "S")
-    candidates.append(vc)
-    if not vc.endswith("M"):
-        candidates.append(vc + "M")
-    if not vc.endswith("A"):
-        candidates.append(vc + "A")
+    for base_vc in base_vcs:
+        if suf and not base_vc.endswith(suf):
+            candidates.append(base_vc + suf)
+        if base_vc != "S" and not base_vc.endswith("S"):
+            candidates.append(base_vc + "S")
+        candidates.append(base_vc)
+        if not base_vc.endswith("M"):
+            candidates.append(base_vc + "M")
+        if not base_vc.endswith("A"):
+            candidates.append(base_vc + "A")
+            
     for c in candidates:
         if c in row:
             try:
-                return float(row[c])
+                # Discard invalid values like -99.0
+                val = float(row[c])
+                if val <= -90.0:
+                    continue
+                return val
             except ValueError:
-                return None
+                continue
     return None
 
 
 def rewrite_cul_values(cul_path: Path, cultivar_code: str, updates: dict[str, float]) -> None:
     raw_lines = cul_path.read_text(encoding="utf-8", errors="ignore").splitlines(keepends=True)
-    updates_u = {str(k).strip().upper(): float(v) for k, v in updates.items()}
+    updates_u = {str(k).replace("\ufeff", "").strip().upper(): float(v) for k, v in updates.items()}
     if not updates_u:
         return
+
+    def _normalize_cul_col(name: str) -> str:
+        return str(name).lstrip("@").replace("\ufeff", "").strip().upper()
 
     header_cols: list[str] | None = None
 
@@ -199,7 +216,7 @@ def rewrite_cul_values(cul_path: Path, cultivar_code: str, updates: dict[str, fl
             out_lines.append(line)
             continue
         if stripped.startswith("@"):
-            header_cols = [c.lstrip("@").strip().upper() for c in stripped.split()]
+            header_cols = [_normalize_cul_col(c) for c in stripped.split()]
             out_lines.append(line)
             continue
         if stripped.startswith("*"):
@@ -353,6 +370,8 @@ def _sample_trts(trts: list[int], max_trts: int, seed_key: str) -> list[int]:
 def _parse_cul_header_and_row(cul_path: Path, cultivar_code: str) -> tuple[list[str], dict[str, float]]:
     lines = cul_path.read_text(encoding="utf-8", errors="ignore").splitlines()
     header_cols: list[str] | None = None
+    def _normalize_cul_col(name: str) -> str:
+        return str(name).lstrip("@").replace("\ufeff", "").strip().upper()
     for line in lines:
         stripped = line.strip()
         if not stripped:
@@ -360,7 +379,7 @@ def _parse_cul_header_and_row(cul_path: Path, cultivar_code: str) -> tuple[list[
         if stripped.startswith("!"):
             continue
         if stripped.startswith("@"):
-            header_cols = [c.lstrip("@").strip().upper() for c in stripped.split()]
+            header_cols = [_normalize_cul_col(c) for c in stripped.split()]
             continue
         if stripped.startswith("*"):
             header_cols = None

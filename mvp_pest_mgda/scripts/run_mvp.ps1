@@ -489,6 +489,38 @@ function Read-KvFile {
     return $kv
 }
 
+function Read-ParParams {
+    param([string]$Path)
+    $kv = @{}
+    if (-not (Test-Path -LiteralPath $Path)) { return $kv }
+    foreach ($line in (Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue)) {
+        $s = ($line | ForEach-Object { $_.Trim() })
+        if ([string]::IsNullOrWhiteSpace($s)) { continue }
+        if ($s.StartsWith('*')) { continue }
+        $parts = $s -split '\s+'
+        if ($parts.Count -lt 2) { continue }
+        $k = $parts[0].Trim().ToLower()
+        try {
+            $kv[$k] = [double]$parts[1]
+        }
+        catch {
+            continue
+        }
+    }
+    return $kv
+}
+
+function Write-ParamsDat {
+    param([string]$Path, [hashtable]$Params)
+    $keys = $Params.Keys | Sort-Object
+    $lines = @()
+    foreach ($k in $keys) {
+        $lines += ("{0} {1}" -f @($k, [double]$Params[$k]))
+    }
+    $lines += ""
+    Set-Content -LiteralPath $Path -Value $lines -Encoding utf8
+}
+
 function Read-RunMeta {
     param([string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) { return $null }
@@ -601,7 +633,7 @@ function Set-IterStage {
 
 function Get-PythonInfo {
     $code = "import json,sys`ntry:`n import pyemu, numpy`n pyemu_v = getattr(pyemu,'__version__', None)`n numpy_v = getattr(numpy,'__version__', None)`nexcept Exception:`n pyemu_v = None`n numpy_v = None`nprint(json.dumps({'python':sys.version.split()[0],'pyemu':pyemu_v,'numpy':numpy_v}))"
-    $json = & python -c $code 2>$null
+    $json = & python -W ignore -c $code 2>$null
     if ([string]::IsNullOrWhiteSpace($json)) { return $null }
     try { return ($json | ConvertFrom-Json) } catch { return $null }
 }
@@ -714,8 +746,9 @@ if ($metaResume) {
         foreach ($h in $metaResume.iter_history) { $iterHistory += $h }
     }
 }
+$env:DSSAT_ALLOW_MISSING_WHT_DATES = "1"
 $iterMaxRaw = $env:MGDA_MAX_ITER
-if ([string]::IsNullOrWhiteSpace($iterMaxRaw)) { $iterMaxRaw = '3' }
+if ([string]::IsNullOrWhiteSpace($iterMaxRaw)) { $iterMaxRaw = '15' }
 $iterMax = [int]$iterMaxRaw
 
 :RunMain foreach ($nopt in $noptList) {
@@ -726,6 +759,65 @@ $iterMax = [int]$iterMaxRaw
     New-Item -ItemType Directory -Path $paretoDir -Force | Out-Null
     $paretoRows = @()
     $stopIter = $null
+    $mgdaGateMode = $env:MGDA_GATE_MODE
+    if ([string]::IsNullOrWhiteSpace($mgdaGateMode)) { $mgdaGateMode = 'pest_streak' }
+    $mgdaGateMode = $mgdaGateMode.Trim().ToLower()
+    $pestImproveEpsRaw = $env:MGDA_PEST_IMPROVE_EPS
+    if ([string]::IsNullOrWhiteSpace($pestImproveEpsRaw)) { $pestImproveEpsRaw = '0.05' }
+    $pestImproveEps = [double]$pestImproveEpsRaw
+    $pestImproveStreakRaw = $env:MGDA_PEST_IMPROVE_STREAK
+    if ([string]::IsNullOrWhiteSpace($pestImproveStreakRaw)) { $pestImproveStreakRaw = '3' }
+    $pestImproveStreakN = [int]$pestImproveStreakRaw
+    $pestPrevPhiW = [double]::NaN
+    $pestNoImproveStreak = 0
+    $mgdaGateOpen = ($mgdaGateMode -eq 'off')
+    $mgdaEverRan = $false
+    $mgdaOnlyRoundsRaw = $env:MGDA_ONLY_ROUNDS
+    if ([string]::IsNullOrWhiteSpace($mgdaOnlyRoundsRaw)) { $mgdaOnlyRoundsRaw = '2' }
+    $mgdaOnlyRounds = [int]$mgdaOnlyRoundsRaw
+    $mgdaOnlyRemaining = 0
+    $mgdaAdaptRaw = $env:MGDA_ADAPT_PARAMS
+    $mgdaAdapt = $true
+    if (-not [string]::IsNullOrWhiteSpace($mgdaAdaptRaw)) {
+        $mgdaAdaptNorm = $mgdaAdaptRaw.Trim().ToLower()
+        if ($mgdaAdaptNorm -in @('0', 'false', 'no')) { $mgdaAdapt = $false }
+    }
+    $cfgMgda = $null
+    if ($cfg -and $cfg.optimization -and $cfg.optimization.mgda) { $cfgMgda = $cfg.optimization.mgda }
+    $trustRelBaseRaw = $env:MGDA_TRUST_REL_BASE
+    if ([string]::IsNullOrWhiteSpace($trustRelBaseRaw)) {
+        if ($cfgMgda -and $cfgMgda.trust_rel) { $trustRelBaseRaw = [string]$cfgMgda.trust_rel } else { $trustRelBaseRaw = '0.1' }
+    }
+    $regLambdaBaseRaw = $env:MGDA_REG_LAMBDA_BASE
+    if ([string]::IsNullOrWhiteSpace($regLambdaBaseRaw)) {
+        if ($cfgMgda -and $cfgMgda.reg_lambda) { $regLambdaBaseRaw = [string]$cfgMgda.reg_lambda } else { $regLambdaBaseRaw = '0.0' }
+    }
+    $mgdaTrustRel = [double]$trustRelBaseRaw
+    $mgdaRegLambda = [double]$regLambdaBaseRaw
+    $trustRelMinRaw = $env:MGDA_TRUST_REL_MIN
+    if ([string]::IsNullOrWhiteSpace($trustRelMinRaw)) { $trustRelMinRaw = '0.02' }
+    $trustRelMaxRaw = $env:MGDA_TRUST_REL_MAX
+    if ([string]::IsNullOrWhiteSpace($trustRelMaxRaw)) { $trustRelMaxRaw = '0.5' }
+    $trustRelUpRaw = $env:MGDA_TRUST_REL_UP
+    if ([string]::IsNullOrWhiteSpace($trustRelUpRaw)) { $trustRelUpRaw = '1.25' }
+    $trustRelDownRaw = $env:MGDA_TRUST_REL_DOWN
+    if ([string]::IsNullOrWhiteSpace($trustRelDownRaw)) { $trustRelDownRaw = '0.7' }
+    $regLambdaMinRaw = $env:MGDA_REG_LAMBDA_MIN
+    if ([string]::IsNullOrWhiteSpace($regLambdaMinRaw)) { $regLambdaMinRaw = '0.0' }
+    $regLambdaMaxRaw = $env:MGDA_REG_LAMBDA_MAX
+    if ([string]::IsNullOrWhiteSpace($regLambdaMaxRaw)) { $regLambdaMaxRaw = '0.2' }
+    $regLambdaUpRaw = $env:MGDA_REG_LAMBDA_UP
+    if ([string]::IsNullOrWhiteSpace($regLambdaUpRaw)) { $regLambdaUpRaw = '1.3' }
+    $regLambdaDownRaw = $env:MGDA_REG_LAMBDA_DOWN
+    if ([string]::IsNullOrWhiteSpace($regLambdaDownRaw)) { $regLambdaDownRaw = '0.8' }
+    $trustRelMin = [double]$trustRelMinRaw
+    $trustRelMax = [double]$trustRelMaxRaw
+    $trustRelUp = [double]$trustRelUpRaw
+    $trustRelDown = [double]$trustRelDownRaw
+    $regLambdaMin = [double]$regLambdaMinRaw
+    $regLambdaMax = [double]$regLambdaMaxRaw
+    $regLambdaUp = [double]$regLambdaUpRaw
+    $regLambdaDown = [double]$regLambdaDownRaw
 
     for ($iter = 0; $iter -lt $iterMax; $iter++) {
         $currentIter = $iter
@@ -736,6 +828,8 @@ $iterMax = [int]$iterMaxRaw
         $iterPestDir = Join-Path $iterDir "pest"
         $iterMgdaDir = Join-Path $iterDir "mgda"
         $iterEvalDir = Join-Path $iterDir "eval"
+        $mgdaRanThisIter = $false
+        $mgdaOnlyActive = ($mgdaOnlyRemaining -gt 0)
         New-Item -ItemType Directory -Path $iterDir -Force | Out-Null
         New-Item -ItemType Directory -Path $iterParamsDir -Force | Out-Null
         New-Item -ItemType Directory -Path $iterDssatDir -Force | Out-Null
@@ -797,80 +891,155 @@ $iterMax = [int]$iterMaxRaw
         }
 
         if (-not ($iterStageMap -and $iterStageMap.ContainsKey('run_pestpp') -and $iterStageMap['run_pestpp'] -eq 'done')) {
-            Write-Host ("[NOPTMAX={0}] [{1}/{2}] [2/5] Run PEST++ GLM (JCO/REI)" -f @($nopt, ($iter + 1), $iterMax)) -ForegroundColor Cyan
-            Set-IterStage -Iter $iter -Stage 'run_pestpp' -Status 'start' -IterDir $iterDir
-            $glmExe = $env:PESTPP_GLM
-            if ([string]::IsNullOrWhiteSpace($glmExe)) {
-                $candidates = @(
-                    (Join-Path $projRoot "pestpp-glm.exe"),
-                    (Join-Path $projRoot "bin\pestpp-glm.exe"),
-                    (Join-Path $projRoot "vendor\pestpp_5.2.16_iwin\bin\pestpp-glm.exe")
-                )
-                foreach ($c in $candidates) {
-                    if (Test-Path -LiteralPath $c) {
-                        $glmExe = $c
-                        break
+            $doPestpp = $true
+            if ($mgdaOnlyActive -and $iter -gt 0) {
+                Write-Host ("[NOPTMAX={0}] [{1}/{2}] [2/5] MGDA-only: reuse previous JCO/REI" -f @($nopt, ($iter + 1), $iterMax)) -ForegroundColor Yellow
+                Set-IterStage -Iter $iter -Stage 'run_pestpp' -Status 'start' -IterDir $iterDir
+                $prevIterKey = Get-IterKey ($iter - 1)
+                $prevIterDir = Join-Path $workDir $prevIterKey
+                $prevJac = $null
+                $prevJco = Join-Path $prevIterDir "ksas_mvp.jco"
+                $prevJcb = Join-Path $prevIterDir "ksas_mvp.jcb"
+                if (Test-Path -LiteralPath $prevJco) { $prevJac = $prevJco }
+                elseif (Test-Path -LiteralPath $prevJcb) { $prevJac = $prevJcb }
+                $prevRei = $null
+                $prevReiCandidates = Get-ChildItem -LiteralPath $prevIterDir -Filter "ksas_mvp*.rei*" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+                if ($prevReiCandidates -and $prevReiCandidates.Count -gt 0) { $prevRei = $prevReiCandidates[0].FullName }
+                if ($prevJac -and $prevRei) {
+                    Copy-Item -LiteralPath (Join-Path $prevIterDir "ksas_mvp.pst") -Destination (Join-Path $iterDir "ksas_mvp.pst") -Force -ErrorAction SilentlyContinue
+                    Copy-Item -LiteralPath $prevJac -Destination (Join-Path $iterDir (Split-Path -Leaf $prevJac)) -Force -ErrorAction SilentlyContinue
+                    Copy-Item -LiteralPath $prevRei -Destination (Join-Path $iterDir (Split-Path -Leaf $prevRei)) -Force -ErrorAction SilentlyContinue
+                    Copy-Item -LiteralPath (Join-Path $iterDir "ksas_mvp.pst") -Destination (Join-Path $iterPestDir "ksas_mvp.pst") -Force -ErrorAction SilentlyContinue
+                    if (Test-Path -LiteralPath (Join-Path $iterDir "ksas_mvp.jco")) {
+                        Copy-Item -LiteralPath (Join-Path $iterDir "ksas_mvp.jco") -Destination (Join-Path $iterPestDir "ksas_mvp.jco") -Force -ErrorAction SilentlyContinue
                     }
+                    if (Test-Path -LiteralPath (Join-Path $iterDir "ksas_mvp.jcb")) {
+                        Copy-Item -LiteralPath (Join-Path $iterDir "ksas_mvp.jcb") -Destination (Join-Path $iterPestDir "ksas_mvp.jcb") -Force -ErrorAction SilentlyContinue
+                    }
+                    Copy-Item -LiteralPath $prevRei -Destination (Join-Path $iterPestDir (Split-Path -Leaf $prevRei)) -Force -ErrorAction SilentlyContinue
+                    $doPestpp = $false
+                    Set-IterStage -Iter $iter -Stage 'run_pestpp' -Status 'done' -IterDir $iterDir
+                }
+                else {
+                    $doPestpp = $true
                 }
             }
-            if (-not (Test-Path -LiteralPath $glmExe)) {
-                throw "pestpp-glm.exe not found. Set PESTPP_GLM or put pestpp-glm.exe in $projRoot."
-            }
-            $pestppGlm = $glmExe
-            $glmLog = (Join-Path $iterDir "glm_console_est.log")
-            $glmErrLog = (Join-Path $iterDir "glm_console_est.err.log")
-            $stageLogMap["$iterKey:run_pestpp"] = $glmLog
-            $exitCode = Invoke-LoggedJob -ScriptBlock {
-                param($workDir, $exePath, $logPath, $errPath)
-                Set-Location $workDir
-                & $exePath "ksas_mvp.pst" 1> $logPath 2> $errPath
-                return $LASTEXITCODE
-            } -ArgumentList @($iterDir, $glmExe, $glmLog, $glmErrLog) -LogPath $glmLog -StageLabel "Run PEST++ GLM"
-            if ($exitCode -ne 0) { throw "pestpp-glm.exe failed (exit $exitCode)" }
-            if ((Test-Path -LiteralPath $glmErrLog) -and ((Get-Item -LiteralPath $glmErrLog).Length -gt 0)) {
-                Add-Content -LiteralPath $glmLog -Value "`n--- STDERR (appended) ---`n"
-                Get-Content -LiteralPath $glmErrLog | Add-Content -LiteralPath $glmLog
-            }
+            if ($doPestpp) {
+                Write-Host ("[NOPTMAX={0}] [{1}/{2}] [2/5] Run PEST++ GLM (JCO/REI)" -f @($nopt, ($iter + 1), $iterMax)) -ForegroundColor Cyan
+                Set-IterStage -Iter $iter -Stage 'run_pestpp' -Status 'start' -IterDir $iterDir
+                $glmExe = $env:PESTPP_GLM
+                if ([string]::IsNullOrWhiteSpace($glmExe)) {
+                    $candidates = @(
+                        (Join-Path $projRoot "pestpp-glm.exe"),
+                        (Join-Path $projRoot "bin\pestpp-glm.exe"),
+                        (Join-Path $projRoot "vendor\pestpp_5.2.16_iwin\bin\pestpp-glm.exe")
+                    )
+                    foreach ($c in $candidates) {
+                        if (Test-Path -LiteralPath $c) {
+                            $glmExe = $c
+                            break
+                        }
+                    }
+                }
+                if (-not (Test-Path -LiteralPath $glmExe)) {
+                    throw "pestpp-glm.exe not found. Set PESTPP_GLM or put pestpp-glm.exe in $projRoot."
+                }
+                $pestppGlm = $glmExe
+                $glmLog = (Join-Path $iterDir "glm_console_est.log")
+                $glmErrLog = (Join-Path $iterDir "glm_console_est.err.log")
+                $stageLogMap["$iterKey:run_pestpp"] = $glmLog
+                $exitCode = Invoke-LoggedJob -ScriptBlock {
+                    param($workDir, $exePath, $logPath, $errPath)
+                    Set-Location $workDir
+                    & $exePath "ksas_mvp.pst" 1> $logPath 2> $errPath
+                    return $LASTEXITCODE
+                } -ArgumentList @($iterDir, $glmExe, $glmLog, $glmErrLog) -LogPath $glmLog -StageLabel "Run PEST++ GLM"
+                if ($exitCode -ne 0) { throw "pestpp-glm.exe failed (exit $exitCode)" }
+                if ((Test-Path -LiteralPath $glmErrLog) -and ((Get-Item -LiteralPath $glmErrLog).Length -gt 0)) {
+                    Add-Content -LiteralPath $glmLog -Value "`n--- STDERR (appended) ---`n"
+                    Get-Content -LiteralPath $glmErrLog | Add-Content -LiteralPath $glmLog
+                }
 
-            if (-not (Test-Path -LiteralPath (Join-Path $iterDir "ksas_mvp.par"))) {
-                throw "PEST parameter file missing (ksas_mvp.par)"
-            }
-            Copy-Item -LiteralPath (Join-Path $iterDir "ksas_mvp.par") -Destination (Join-Path $iterDir "ksas_mvp_est.par") -Force
+                if (-not (Test-Path -LiteralPath (Join-Path $iterDir "ksas_mvp.par"))) {
+                    throw "PEST parameter file missing (ksas_mvp.par)"
+                }
+                Copy-Item -LiteralPath (Join-Path $iterDir "ksas_mvp.par") -Destination (Join-Path $iterDir "ksas_mvp_est.par") -Force
 
-            $null = Wait-ForAnyFile -Dir $iterDir -Filter "ksas_mvp.jc*" -TimeoutSeconds 300
-            $hasJac = (Test-Path -LiteralPath (Join-Path $iterDir "ksas_mvp.jco")) -or (Test-Path -LiteralPath (Join-Path $iterDir "ksas_mvp.jcb"))
-            if (-not $hasJac) { throw "Jacobian missing (ksas_mvp.jco/.jcb)" }
-            $null = Wait-ForAnyFile -Dir $iterDir -Filter "ksas_mvp*.rei*" -TimeoutSeconds 300
-            $reiCandidates = Get-ChildItem -LiteralPath $iterDir -Filter "ksas_mvp*.rei*" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
-            if (($null -eq $reiCandidates) -or ($reiCandidates.Count -lt 1)) { throw "Residual file missing (ksas_mvp*.rei*)" }
-            Copy-Item -LiteralPath (Join-Path $iterDir "ksas_mvp.pst") -Destination (Join-Path $iterPestDir "ksas_mvp.pst") -Force -ErrorAction SilentlyContinue
-            Copy-Item -LiteralPath (Join-Path $iterDir "ksas_mvp.jco") -Destination (Join-Path $iterPestDir "ksas_mvp.jco") -Force -ErrorAction SilentlyContinue
-            Copy-Item -LiteralPath (Join-Path $iterDir "ksas_mvp.jcb") -Destination (Join-Path $iterPestDir "ksas_mvp.jcb") -Force -ErrorAction SilentlyContinue
-            Copy-Item -LiteralPath (Join-Path $iterDir "ksas_mvp.rei") -Destination (Join-Path $iterPestDir "ksas_mvp.rei") -Force -ErrorAction SilentlyContinue
-            Set-IterStage -Iter $iter -Stage 'run_pestpp' -Status 'done' -IterDir $iterDir
+                $null = Wait-ForAnyFile -Dir $iterDir -Filter "ksas_mvp.jc*" -TimeoutSeconds 300
+                $hasJac = (Test-Path -LiteralPath (Join-Path $iterDir "ksas_mvp.jco")) -or (Test-Path -LiteralPath (Join-Path $iterDir "ksas_mvp.jcb"))
+                if (-not $hasJac) { throw "Jacobian missing (ksas_mvp.jco/.jcb)" }
+                $null = Wait-ForAnyFile -Dir $iterDir -Filter "ksas_mvp*.rei*" -TimeoutSeconds 300
+                $reiCandidates = Get-ChildItem -LiteralPath $iterDir -Filter "ksas_mvp*.rei*" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+                if (($null -eq $reiCandidates) -or ($reiCandidates.Count -lt 1)) { throw "Residual file missing (ksas_mvp*.rei*)" }
+                Copy-Item -LiteralPath (Join-Path $iterDir "ksas_mvp.pst") -Destination (Join-Path $iterPestDir "ksas_mvp.pst") -Force -ErrorAction SilentlyContinue
+                Copy-Item -LiteralPath (Join-Path $iterDir "ksas_mvp.jco") -Destination (Join-Path $iterPestDir "ksas_mvp.jco") -Force -ErrorAction SilentlyContinue
+                Copy-Item -LiteralPath (Join-Path $iterDir "ksas_mvp.jcb") -Destination (Join-Path $iterPestDir "ksas_mvp.jcb") -Force -ErrorAction SilentlyContinue
+                Copy-Item -LiteralPath (Join-Path $iterDir "ksas_mvp.rei") -Destination (Join-Path $iterPestDir "ksas_mvp.rei") -Force -ErrorAction SilentlyContinue
+                Set-IterStage -Iter $iter -Stage 'run_pestpp' -Status 'done' -IterDir $iterDir
+            }
         }
 
         if (-not ($iterStageMap -and $iterStageMap.ContainsKey('mgda_update') -and $iterStageMap['mgda_update'] -eq 'done')) {
-            Write-Host ("[NOPTMAX={0}] [{1}/{2}] [3/5] Compute MGDA parameter update" -f @($nopt, ($iter + 1), $iterMax)) -ForegroundColor Cyan
-            Set-IterStage -Iter $iter -Stage 'mgda_update' -Status 'start' -IterDir $iterDir
-            $env:OUT_PARAMS_PATH = (Join-Path $iterDir "params_mgda.dat")
-            $mgdaLog = (Join-Path $iterDir "mgda_console.log")
-            $stageLogMap["$iterKey:mgda_update"] = $mgdaLog
-            $exitCode = Invoke-LoggedJob -ScriptBlock {
-                param($workDir, $projRootPath, $logPath)
-                Set-Location $workDir
-                $ErrorActionPreference = 'Continue'
-                python (Join-Path $projRootPath "src\mgda_update.py") 2>&1 | Out-File -LiteralPath $logPath -Encoding utf8
-                return $LASTEXITCODE
-            } -ArgumentList @($iterDir, $projRoot, $mgdaLog) -LogPath $mgdaLog -StageLabel "MGDA update"
-            if ($exitCode -ne 0) { throw "mgda_update.py failed (exit $exitCode)" }
-            Remove-Item Env:OUT_PARAMS_PATH -ErrorAction SilentlyContinue
-            if (-not (Test-Path -LiteralPath (Join-Path $iterDir "params_mgda.dat"))) { throw "MGDA params missing (params_mgda.dat)" }
-            if (-not (Test-Path -LiteralPath (Join-Path $iterDir "mgda_report.txt"))) { throw "MGDA report missing (mgda_report.txt)" }
-            Copy-Item -LiteralPath (Join-Path $iterDir "params_mgda.dat") -Destination (Join-Path $iterDir "params_next.dat") -Force
-            Copy-Item -LiteralPath (Join-Path $iterDir "params_mgda.dat") -Destination (Join-Path $iterMgdaDir "params_mgda.dat") -Force
-            Copy-Item -LiteralPath (Join-Path $iterDir "mgda_report.txt") -Destination (Join-Path $iterMgdaDir "mgda_report.txt") -Force
-            Set-IterStage -Iter $iter -Stage 'mgda_update' -Status 'done' -IterDir $iterDir
+            $allowMgda = $true
+            if (-not $mgdaOnlyActive -and $mgdaGateMode -eq 'pest_streak' -and (-not $mgdaGateOpen)) { $allowMgda = $false }
+            if (-not $allowMgda) {
+                Write-Host ("[NOPTMAX={0}] [{1}/{2}] [3/5] Skip MGDA update (waiting for PEST plateau)" -f @($nopt, ($iter + 1), $iterMax)) -ForegroundColor Yellow
+                Set-IterStage -Iter $iter -Stage 'mgda_update' -Status 'start' -IterDir $iterDir
+                $mgdaLog = (Join-Path $iterDir "mgda_console.log")
+                $stageLogMap["$iterKey:mgda_update"] = $mgdaLog
+                Set-Content -LiteralPath $mgdaLog -Value "MGDA skipped: waiting for PEST plateau" -Encoding utf8
+                $pestParCandidates = @(
+                    (Join-Path $iterDir "ksas_mvp_est.par"),
+                    (Join-Path $iterDir "ksas_mvp.par"),
+                    (Join-Path $iterDir "ksas_mvp.post.par")
+                )
+                $pestPar = $null
+                foreach ($c in $pestParCandidates) { if (Test-Path -LiteralPath $c) { $pestPar = $c; break } }
+                if (-not $pestPar) { throw "PEST parameter file missing for MGDA gating" }
+                $pestParams = Read-ParParams $pestPar
+                if (-not $pestParams -or $pestParams.Count -lt 1) { throw "PEST parameter file empty for MGDA gating" }
+                Write-ParamsDat -Path (Join-Path $iterDir "params_mgda.dat") -Params $pestParams
+                Write-ParamsDat -Path (Join-Path $iterDir "params_next.dat") -Params $pestParams
+                $mgdaReport = @(
+                    "status=skipped",
+                    "reason=pest_no_plateau",
+                    "step=0"
+                )
+                Set-Content -LiteralPath (Join-Path $iterDir "mgda_report.txt") -Value $mgdaReport -Encoding utf8
+                Copy-Item -LiteralPath (Join-Path $iterDir "params_mgda.dat") -Destination (Join-Path $iterMgdaDir "params_mgda.dat") -Force
+                Copy-Item -LiteralPath (Join-Path $iterDir "mgda_report.txt") -Destination (Join-Path $iterMgdaDir "mgda_report.txt") -Force
+                Set-IterStage -Iter $iter -Stage 'mgda_update' -Status 'done' -IterDir $iterDir
+            }
+            else {
+                Write-Host ("[NOPTMAX={0}] [{1}/{2}] [3/5] Compute MGDA parameter update" -f @($nopt, ($iter + 1), $iterMax)) -ForegroundColor Cyan
+                Set-IterStage -Iter $iter -Stage 'mgda_update' -Status 'start' -IterDir $iterDir
+                if ($mgdaAdapt) {
+                    $env:MGDA_TRUST_REL = [string]$mgdaTrustRel
+                    $env:MGDA_REG_LAMBDA = [string]$mgdaRegLambda
+                }
+                $env:OUT_PARAMS_PATH = (Join-Path $iterDir "params_mgda.dat")
+                $mgdaLog = (Join-Path $iterDir "mgda_console.log")
+                $stageLogMap["$iterKey:mgda_update"] = $mgdaLog
+                $exitCode = Invoke-LoggedJob -ScriptBlock {
+                    param($workDir, $projRootPath, $logPath)
+                    Set-Location $workDir
+                    $ErrorActionPreference = 'Continue'
+                    python (Join-Path $projRootPath "src\mgda_update.py") 2>&1 | Out-File -LiteralPath $logPath -Encoding utf8
+                    return $LASTEXITCODE
+                } -ArgumentList @($iterDir, $projRoot, $mgdaLog) -LogPath $mgdaLog -StageLabel "MGDA update"
+                if ($exitCode -ne 0) { throw "mgda_update.py failed (exit $exitCode)" }
+                Remove-Item Env:OUT_PARAMS_PATH -ErrorAction SilentlyContinue
+                if (-not (Test-Path -LiteralPath (Join-Path $iterDir "params_mgda.dat"))) { throw "MGDA params missing (params_mgda.dat)" }
+                if (-not (Test-Path -LiteralPath (Join-Path $iterDir "mgda_report.txt"))) { throw "MGDA report missing (mgda_report.txt)" }
+                Remove-Item Env:MGDA_TRUST_REL -ErrorAction SilentlyContinue
+                Remove-Item Env:MGDA_REG_LAMBDA -ErrorAction SilentlyContinue
+                Copy-Item -LiteralPath (Join-Path $iterDir "params_mgda.dat") -Destination (Join-Path $iterDir "params_next.dat") -Force
+                Copy-Item -LiteralPath (Join-Path $iterDir "params_mgda.dat") -Destination (Join-Path $iterMgdaDir "params_mgda.dat") -Force
+                Copy-Item -LiteralPath (Join-Path $iterDir "mgda_report.txt") -Destination (Join-Path $iterMgdaDir "mgda_report.txt") -Force
+                Set-IterStage -Iter $iter -Stage 'mgda_update' -Status 'done' -IterDir $iterDir
+                $mgdaRanThisIter = $true
+                if ($mgdaOnlyActive -and $mgdaOnlyRemaining -gt 0) { $mgdaOnlyRemaining -= 1 }
+            }
         }
 
         if (-not ($iterStageMap -and $iterStageMap.ContainsKey('evaluate') -and $iterStageMap['evaluate'] -eq 'done')) {
@@ -909,11 +1078,28 @@ $iterMax = [int]$iterMaxRaw
         $pest = $sum | Where-Object { $_.scenario -eq 'pest' } | Select-Object -First 1
         $mgda = $sum | Where-Object { $_.scenario -eq 'mgda' } | Select-Object -First 1
         $mgdaMeta = Read-KvFile (Join-Path $iterDir "mgda_report.txt")
+        $mgdaStatus = $mgdaMeta['status']
+        if ($mgdaRanThisIter -or ($mgdaStatus -and ($mgdaStatus -ne 'skipped'))) { $mgdaEverRan = $true }
 
         $pestPhiW = [double]$pest.phi_w
         $mgdaPhiW = [double]$mgda.phi_w
         $gainPhiW = $pestPhiW - $mgdaPhiW
         $gainPct = if ($pestPhiW -ne 0.0) { $gainPhiW / $pestPhiW } else { [double]::NaN }
+        if ($mgdaGateMode -eq 'pest_streak') {
+            if ([double]::IsNaN($pestPrevPhiW)) {
+                $pestPrevPhiW = $pestPhiW
+                $pestNoImproveStreak = 0
+            }
+            else {
+            $pestImp = $pestPrevPhiW - $pestPhiW
+            if ([double]::IsNaN($pestImp) -or [double]::IsInfinity($pestImp)) { $pestImp = 0.0 }
+            $pestImpRel = if ($pestPrevPhiW -ne 0.0) { $pestImp / [math]::Abs($pestPrevPhiW) } else { 0.0 }
+            if ($pestImpRel -lt $pestImproveEps) { $pestNoImproveStreak += 1 } else { $pestNoImproveStreak = 0 }
+                $pestPrevPhiW = $pestPhiW
+            }
+            if (-not $mgdaGateOpen -and ($pestNoImproveStreak -ge $pestImproveStreakN)) { $mgdaGateOpen = $true }
+            if ($pestNoImproveStreak -ge $pestImproveStreakN -and $mgdaOnlyRounds -gt 0 -and $mgdaOnlyRemaining -le 0) { $mgdaOnlyRemaining = $mgdaOnlyRounds }
+        }
 
         $warningOut = if (Test-Path -LiteralPath (Join-Path $iterDir "WARNING.OUT")) { (Join-Path $iterDir "WARNING.OUT") } else { $null }
         $ablRows += [pscustomobject]@{
@@ -926,12 +1112,16 @@ $iterMax = [int]$iterMaxRaw
             pest_train_n_trt = Get-IntField $pest 'train_n_trt'
             pest_train_n_wht = Get-IntField $pest 'train_n_wht'
             pest_train_rmse_yield = Get-DoubleField $pest 'train_rmse_yield'
+            pest_train_nrmse_yield = Get-DoubleField $pest 'train_nrmse_mean_yield'
+            pest_train_dindex_yield = Get-DoubleField $pest 'train_dindex_yield'
+            pest_train_bias_yield = Get-DoubleField $pest 'train_bias_yield'
             pest_train_rmse_laix = Get-DoubleField $pest 'train_rmse_laix'
+            pest_train_nrmse_laix = Get-DoubleField $pest 'train_nrmse_mean_laix'
+            pest_train_dindex_laix = Get-DoubleField $pest 'train_dindex_laix'
+            pest_train_bias_laix = Get-DoubleField $pest 'train_bias_laix'
             pest_train_rmse_laid = Get-DoubleField $pest 'train_rmse_laid'
             pest_train_rmse_lwad = Get-DoubleField $pest 'train_rmse_lwad'
             pest_train_rmse_swad = Get-DoubleField $pest 'train_rmse_swad'
-            pest_train_bias_yield = Get-DoubleField $pest 'train_bias_yield'
-            pest_train_bias_laix = Get-DoubleField $pest 'train_bias_laix'
             pest_train_phi = Get-DoubleField $pest 'train_phi'
             pest_train_phi_w = Get-DoubleField $pest 'train_phi_w'
             pest_valid_n_trt = Get-IntField $pest 'valid_n_trt'
@@ -948,12 +1138,16 @@ $iterMax = [int]$iterMaxRaw
             mgda_train_n_trt = Get-IntField $mgda 'train_n_trt'
             mgda_train_n_wht = Get-IntField $mgda 'train_n_wht'
             mgda_train_rmse_yield = Get-DoubleField $mgda 'train_rmse_yield'
+            mgda_train_nrmse_yield = Get-DoubleField $mgda 'train_nrmse_mean_yield'
+            mgda_train_dindex_yield = Get-DoubleField $mgda 'train_dindex_yield'
+            mgda_train_bias_yield = Get-DoubleField $mgda 'train_bias_yield'
             mgda_train_rmse_laix = Get-DoubleField $mgda 'train_rmse_laix'
+            mgda_train_nrmse_laix = Get-DoubleField $mgda 'train_nrmse_mean_laix'
+            mgda_train_dindex_laix = Get-DoubleField $mgda 'train_dindex_laix'
+            mgda_train_bias_laix = Get-DoubleField $mgda 'train_bias_laix'
             mgda_train_rmse_laid = Get-DoubleField $mgda 'train_rmse_laid'
             mgda_train_rmse_lwad = Get-DoubleField $mgda 'train_rmse_lwad'
             mgda_train_rmse_swad = Get-DoubleField $mgda 'train_rmse_swad'
-            mgda_train_bias_yield = Get-DoubleField $mgda 'train_bias_yield'
-            mgda_train_bias_laix = Get-DoubleField $mgda 'train_bias_laix'
             mgda_train_phi = Get-DoubleField $mgda 'train_phi'
             mgda_train_phi_w = Get-DoubleField $mgda 'train_phi_w'
             mgda_valid_n_trt = Get-IntField $mgda 'valid_n_trt'
@@ -988,21 +1182,52 @@ $iterMax = [int]$iterMaxRaw
             run_dir = $iterDir
         }
 
-        $prev = $prevPhiW
-        $curr = $mgdaPhiW
-        if ([double]::IsNaN($prev)) {
-            $prevPhiW = $curr
-            $noImproveStreak = 0
+        if ($mgdaEverRan) {
+            $prev = $prevPhiW
+            $curr = $mgdaPhiW
+            if ([double]::IsNaN($prev)) {
+                $prevPhiW = $curr
+                $noImproveStreak = 0
+            }
+            else {
+                $imp = $prev - $curr
+                if ([double]::IsNaN($imp) -or [double]::IsInfinity($imp)) { $imp = 0.0 }
+                if ($imp -lt $improveEps) { $noImproveStreak += 1 } else { $noImproveStreak = 0 }
+                $prevPhiW = $curr
+            }
         }
         else {
-            $imp = $prev - $curr
-            if ([double]::IsNaN($imp) -or [double]::IsInfinity($imp)) { $imp = 0.0 }
-            if ($imp -lt $improveEps) { $noImproveStreak += 1 } else { $noImproveStreak = 0 }
-            $prevPhiW = $curr
+            $prevPhiW = [double]::NaN
+            $noImproveStreak = 0
         }
 
-        $stationary = ($mgdaMeta['status'] -eq 'pareto_stationary') -or ($mgdaMeta['step'] -eq '0.000000')
-        if ($allowEarlyStop -and ($stationary -or ($noImproveStreak -ge $improveStreakN))) {
+        if ($mgdaAdapt -and ($mgdaRanThisIter -or ($mgdaStatus -and ($mgdaStatus -ne 'skipped')))) {
+            $mgdaBacktracks = 0
+            if ($mgdaMeta.ContainsKey('backtracks')) { try { $mgdaBacktracks = [int]$mgdaMeta['backtracks'] } catch { $mgdaBacktracks = 0 } }
+            $mgdaPhi0 = [double]::NaN
+            $mgdaPhi1 = [double]::NaN
+            if ($mgdaMeta.ContainsKey('phi0')) { try { $mgdaPhi0 = [double]$mgdaMeta['phi0'] } catch { } }
+            if ($mgdaMeta.ContainsKey('phi1')) { try { $mgdaPhi1 = [double]$mgdaMeta['phi1'] } catch { } }
+            $mgdaImproved = $false
+            if ((-not [double]::IsNaN($mgdaPhi0)) -and (-not [double]::IsNaN($mgdaPhi1))) {
+                if ($mgdaPhi1 -le $mgdaPhi0) { $mgdaImproved = $true }
+            }
+            if ($mgdaStatus -eq 'rejected' -or $mgdaBacktracks -ge 4) {
+                $mgdaTrustRel = [math]::Max($trustRelMin, [math]::Min($trustRelMax, $mgdaTrustRel * $trustRelDown))
+                $mgdaRegLambda = [math]::Max($regLambdaMin, [math]::Min($regLambdaMax, $mgdaRegLambda * $regLambdaUp))
+            }
+            elseif ($mgdaImproved -and $mgdaBacktracks -le 1) {
+                $mgdaTrustRel = [math]::Max($trustRelMin, [math]::Min($trustRelMax, $mgdaTrustRel * $trustRelUp))
+                $mgdaRegLambda = [math]::Max($regLambdaMin, [math]::Min($regLambdaMax, $mgdaRegLambda * $regLambdaDown))
+            }
+            elseif (-not $mgdaImproved -and $mgdaBacktracks -ge 2) {
+                $mgdaTrustRel = [math]::Max($trustRelMin, [math]::Min($trustRelMax, $mgdaTrustRel * $trustRelDown))
+                $mgdaRegLambda = [math]::Max($regLambdaMin, [math]::Min($regLambdaMax, $mgdaRegLambda * $regLambdaUp))
+            }
+        }
+
+        $stationary = $mgdaEverRan -and (($mgdaStatus -eq 'pareto_stationary') -or ($mgdaMeta['step'] -eq '0.000000'))
+        if ($allowEarlyStop -and $mgdaEverRan -and ($mgdaOnlyRemaining -le 0) -and ($stationary -or ($noImproveStreak -ge $improveStreakN))) {
             $stopIter = $iter
             break
         }

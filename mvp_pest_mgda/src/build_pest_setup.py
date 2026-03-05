@@ -308,19 +308,26 @@ def _write_pest_out_ins(
     wht_dates_by_trt: dict[int, list[int]] | None = None,
     wht_second: str = "",
 ) -> None:
+    # Use key-name markers (~key~) instead of blind l1 line-advance.
+    # pest_out.dat format is "key value" with possible blank lines, so
+    # searching by key marker ensures PEST reads the correct value.
     lines = ["pif ~"]
     for trt in trts:
         if str(yield_var).strip() and (obs_trts_yield is None or int(trt) in obs_trts_yield):
             yk = str(yield_var).strip().lower()
-            lines.append(f"l1 w !{yk}_t{int(trt):02d}!")
+            obs_key = f"{yk}_t{int(trt):02d}"
+            lines.append(f"~{obs_key}~ !{obs_key}!")
         if laix_var and (obs_trts_laix is None or int(trt) in obs_trts_laix):
             lk = str(laix_var).strip().lower()
-            lines.append(f"l1 w !{lk}_t{int(trt):02d}!")
+            obs_key = f"{lk}_t{int(trt):02d}"
+            lines.append(f"~{obs_key}~ !{obs_key}!")
         if wht_dates_by_trt and int(trt) in wht_dates_by_trt:
             for d in wht_dates_by_trt[int(trt)]:
-                lines.append(f"l1 w !laid_t{int(trt):02d}_d{int(d)}!")
+                obs_key = f"laid_t{int(trt):02d}_d{int(d)}"
+                lines.append(f"~{obs_key}~ !{obs_key}!")
                 if wht_second:
-                    lines.append(f"l1 w !{str(wht_second).strip().lower()}_t{int(trt):02d}_d{int(d)}!")
+                    obs_key2 = f"{str(wht_second).strip().lower()}_t{int(trt):02d}_d{int(d)}"
+                    lines.append(f"~{obs_key2}~ !{obs_key2}!")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -624,10 +631,11 @@ def main() -> None:
     _write_pest_out_ins(cwd / "pest_out.ins", trts, yield_var, laix_var, obs_trts_yield, obs_trts_laix, wht_dates_by_trt, wht_second)
 
     # Multi-start seeding (LHS)
-    start_mode = os.environ.get("MGDA_START_MODE", "").strip().lower()
-    start_count = int(os.environ.get("MGDA_START_COUNT", "1"))
-    start_index = int(os.environ.get("MGDA_START_INDEX", "0"))
-    if start_mode == "lhs" and start_count > 1:
+    mgda_cfg = cfg.get("optimization", {}).get("mgda", {})
+    start_mode = str(mgda_cfg.get("start_mode", "")).strip().lower() or os.environ.get("MGDA_START_MODE", "").strip().lower()
+    start_count = int(mgda_cfg.get("start_count", os.environ.get("MGDA_START_COUNT", "1")))
+    start_index = int(mgda_cfg.get("start_index", os.environ.get("MGDA_START_INDEX", "0")))
+    if start_mode in ("lhs", "random"):
         bounds_seed: dict[str, tuple[float, float]] = {
             "sh2o_15": (0.05, 0.40),
             "sh2o_30": (0.05, 0.40),
@@ -645,11 +653,28 @@ def main() -> None:
                 k_l = str(k).strip().lower()
                 mapped = param_map.get(k_l, k_l)
                 bounds_seed[mapped] = (float(v[0]), float(v[1]))
-        s = max(0, min(start_index, max(0, start_count - 1)))
-        x = (s + 0.5) / float(start_count)
+                
         params_seed: dict[str, float] = {}
-        for k, (lb, ub) in bounds_seed.items():
-            params_seed[k] = float(lb + x * (ub - lb))
+        if start_mode == "random":
+            import random as _rnd
+            rng = _rnd.Random() # we don't necessarily want fixed seed here, so different runs get different starts
+            for k, (lb, ub) in bounds_seed.items():
+                params_seed[k] = float(lb + rng.random() * (ub - lb))
+        else: # lhs style
+            start_count = max(1, start_count)
+            s = max(0, min(start_index, max(0, start_count - 1)))
+            try:
+                from scipy.stats import qmc
+                sampler = qmc.LatinHypercube(d=len(bounds_seed), seed=42)
+                sample = sampler.random(n=start_count)
+                for i, (k, (lb, ub)) in enumerate(bounds_seed.items()):
+                    params_seed[k] = float(lb + sample[s, i] * (ub - lb))
+            except ImportError:
+                # Fallback to simple grid if scipy is missing
+                x = (s + 0.5) / float(start_count)
+                for k, (lb, ub) in bounds_seed.items():
+                    params_seed[k] = float(lb + x * (ub - lb))
+
         # Preserve any existing keys not in bounds
         try:
             existing = _read_params(cwd / "params.dat")

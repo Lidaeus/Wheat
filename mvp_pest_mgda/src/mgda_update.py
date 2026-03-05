@@ -94,10 +94,26 @@ def _extract_trt_from_obs_name(name: str) -> int | None:
     return None
 
 
+def _extract_dap_from_obs_name(name: str) -> int | None:
+    import re as _re
+    m = _re.search(r"_d(\d{1,3})$", str(name).lower())
+    if m:
+        try:
+            return int(m.group(1))
+        except ValueError:
+            return None
+    return None
+
+
 def _resolve_split(cfg: dict, trts: list[int]) -> dict[int, str]:
     split_cfg = cfg.get("split", {})
     mode = str(split_cfg.get("mode", "trt")).strip().lower()
     all_trts = [int(t) for t in trts]
+
+    # mode='none' or 'all' → every TRT is training, no validation
+    if mode in {"none", "all"}:
+        return {int(t): "train" for t in all_trts}
+
     train = {int(t) for t in (split_cfg.get("train_trts") or []) if str(t).strip()}
     valid = {int(t) for t in (split_cfg.get("valid_trts") or []) if str(t).strip()}
 
@@ -182,9 +198,17 @@ def _calc_group_variances(obs, split_by_trt: dict[int, str], cfg: dict) -> dict[
     return out
 
 
-def _calc_phi(pst: pyemu.Pst, sim: dict[str, float]) -> float:
+def _calc_phi(
+    pst: pyemu.Pst, 
+    sim: dict[str, float], 
+    cfg: dict, 
+    group_obs_std: dict[str, float], 
+    group_sizes: dict[str, int]
+) -> float:
     obs = pst.observation_data
     phi = 0.0
+    
+    # 按照在 main 里计算的方式使用 Z-Score normalization 计算无量纲的总合 phi
     for oname, row in obs.iterrows():
         k = str(oname).strip().lower()
         if k not in sim:
@@ -194,12 +218,36 @@ def _calc_phi(pst: pyemu.Pst, sim: dict[str, float]) -> float:
             o = float(row.obsval)
         except Exception:
             continue
+            
         e = float(sim[k]) - o
-        phi += (e * w) ** 2
+        
+        # 寻找对应的组和对应的 sigma_obs
+        gn = _resolve_obs_group_name(k, "obs", cfg)
+        sigma_obs = float(group_obs_std.get(gn, 1.0))
+        size = float(group_sizes.get(gn, 1.0))
+        if size <= 0.0:
+            size = 1.0
+            
+        # 归一化误差：e_norm = (e / sigma_obs) / sqrt(size) -> 也就是在累加前进行 1/size 放缩，
+        # 和梯度的 / size 保持平衡，避免大组误差霸凌。 另外自带 w.
+        # 但在这个 _calc_phi 我们只提供给 Backtrack 判定总方向是否改善。
+        # 为了与梯度的下降量级一致：(e * w / sigma_obs)^2 / size
+        # 这样不同量纲、不同组大小的目标就完全拉平了。
+        e_norm = (e * w / sigma_obs)
+        phi += (e_norm ** 2) / size
+        
     return float(phi)
 
 
-def _evaluate_phi(work_dir: Path, pst: pyemu.Pst, run_model_path: Path, params: dict[str, float]) -> float:
+def _evaluate_phi(
+    work_dir: Path, 
+    pst: pyemu.Pst, 
+    run_model_path: Path, 
+    params: dict[str, float],
+    cfg: dict,
+    group_obs_std: dict[str, float],
+    group_sizes: dict[str, int],
+) -> float:
     eval_params_path = work_dir / "_mgda_eval_params.dat"
     _write_params_dat(eval_params_path, params)
 
@@ -217,7 +265,7 @@ def _evaluate_phi(work_dir: Path, pst: pyemu.Pst, run_model_path: Path, params: 
         raise RuntimeError(f"run_model.py failed: {cp.returncode}\nSTDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}")
 
     sim = _read_kv_out(work_dir / "pest_out.dat")
-    return _calc_phi(pst, sim)
+    return _calc_phi(pst, sim, cfg, group_obs_std, group_sizes)
 
 
 def _write_params_dat(path: Path, params: dict[str, float]) -> None:
@@ -328,25 +376,33 @@ def main() -> None:
         group_index.setdefault(gn, []).append(i)
 
     weight_eps = float(os.environ.get("MGDA_WEIGHT_EPS", "1e-6"))
-    group_weights: dict[str, float] = {}
+    group_obs_std: dict[str, float] = {}
     for gn, idx in group_index.items():
         fallback = float(group_defs.get(gn, {}).get("weight", 1.0))
-        if idx:
-            r_train = resid[idx]
-            try:
-                rmse = float(np.sqrt(float(np.mean(r_train ** 2))))
-            except Exception:
-                rmse = float("nan")
-            if math.isfinite(rmse) and rmse >= 0.0:
-                group_weights[gn] = float(1.0 / (weight_eps + rmse))
+        if idx and len(idx) > 1:
+            obs_vals = obs.obsval.iloc[idx].to_numpy(dtype=float)
+            stdev = float(np.std(obs_vals, ddof=1))
+            if math.isfinite(stdev) and stdev > weight_eps:
+                group_obs_std[gn] = stdev
             else:
-                group_weights[gn] = float(fallback)
+                mean_val = float(np.mean(obs_vals))
+                group_obs_std[gn] = abs(mean_val) if abs(mean_val) > weight_eps else 1.0
+        elif idx:
+            val = float(obs.obsval.iloc[idx[0]])
+            group_obs_std[gn] = abs(val) if abs(val) > weight_eps else 1.0
         else:
-            group_weights[gn] = float(fallback)
+            group_obs_std[gn] = 1.0
 
     mgda_cfg = cfg.get("optimization", {}).get("mgda", {})
     sigma_whiten = bool(mgda_cfg.get("sigma_prewhiten", mgda_cfg.get("sigma_whiten", False)))
     norm_strategy = str(mgda_cfg.get("normalize", "l2")).strip().lower()
+
+    # Time-decay settings
+    time_decay_cfg = mgda_cfg.get("time_decay", {})
+    w_base = float(time_decay_cfg.get("w_base", 1.0))
+    w_max = float(time_decay_cfg.get("w_max", 2.0))
+    k_slope = float(time_decay_cfg.get("k_slope", 0.05))
+    t_mid = float(time_decay_cfg.get("t_mid", 60.0))
     eff_mode = str(mgda_cfg.get("eff_n_mode", "sqrt")).strip().lower()
     near_zero_eps = float(os.environ.get("MGDA_NEAR_ZERO_EPS", mgda_cfg.get("near_zero_eps", "1e-12")))
     trust_rel = float(os.environ.get("MGDA_TRUST_REL", mgda_cfg.get("trust_rel", "0.1")))
@@ -368,13 +424,46 @@ def main() -> None:
         Jg = J[idx, :]
         spec = cfg.get("observations", {}).get("groups", {}).get(gn, {})
         sigma = float(spec.get("sigma", 1.0))
+
+        # Intra-group time-decay computation
+        obs_names_in_group = [names[i] for i in idx]
+        daps = [_extract_dap_from_obs_name(n) for n in obs_names_in_group]
+        
+        # Apply time-decay weights if at least one observation has a valid DAP and time_decay is enabled
+        decay_weights = np.ones(len(idx), dtype=float)
+        if any(d is not None for d in daps) and w_max > w_base:
+            # Fallback max DAP if t_mid is configured as percentage (e.g. 0.5)
+            # Find max valid DAP to map percentage
+            valid_daps = [d for d in daps if d is not None]
+            local_t_mid = t_mid
+            if 0.0 < t_mid < 1.0 and valid_daps:
+                local_t_mid = max(valid_daps) * t_mid
+            
+            for j, d in enumerate(daps):
+                if d is not None:
+                    # Logistic bounded decay: w_base + (w_max - w_base) / (1 + exp(-k * (t - t_mid)))
+                    decay_weights[j] = w_base + (w_max - w_base) / (1.0 + math.exp(-k_slope * (float(d) - local_t_mid)))
+        
+        # Z-Score normalization denominator (sigma_obs)
+        sigma_obs = float(group_obs_std.get(gn, 1.0))
+        
+        # Apply time decay and normalization to residual AND Jacobian to obey chain rule
+        w_factor = decay_weights / sigma_obs
+        r = r * w_factor
+        Jg = Jg * w_factor[:, np.newaxis]
+        
         if sigma_whiten and math.isfinite(sigma) and sigma != 1.0:
             r = r / sigma
             Jg = Jg / sigma
-        g = -(Jg.T @ r)
-        w = float(group_weights.get(gn, 1.0))
-        g = g * w
+        
         size = int(len(idx))
+        if size > 0:
+            g = -(Jg.T @ r) / float(size)
+        else:
+            g = np.zeros(Jg.shape[1], dtype=float)
+            
+        w = float(group_defs.get(gn, {}).get("weight", 1.0))
+        g = g * w
         eff_n = spec.get("eff_n", None)
         if eff_n is not None:
             try:
@@ -471,7 +560,7 @@ def main() -> None:
 
     if safe:
         run_model_path = Path(__file__).resolve().parents[1] / "src" / "run_model.py"
-        phi0 = _evaluate_phi(cwd, pst, run_model_path, p0)
+        phi0 = _evaluate_phi(cwd, pst, run_model_path, p0, cfg, group_obs_std, group_sizes)
         phi_tol = float(os.environ.get("MGDA_PHI_TOL", "0.0"))
         max_back = int(os.environ.get("MGDA_MAX_BACKTRACK", "8"))
         accepted = False
@@ -482,7 +571,7 @@ def main() -> None:
             x1 = np.clip(x0 + delta, 0.0, 1.0)
             cand = {p: float(lb[p] + x1[i] * (ub[p] - lb[p])) for i, p in enumerate(par_names)}
             try:
-                phi_c = _evaluate_phi(cwd, pst, run_model_path, cand)
+                phi_c = _evaluate_phi(cwd, pst, run_model_path, cand, cfg, group_obs_std, group_sizes)
             except Exception:
                 phi_c = float("inf")
             if math.isfinite(phi_c) and phi_c <= phi0 * (1.0 + phi_tol):

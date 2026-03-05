@@ -18,7 +18,7 @@
     "sol_updates": []
   },
   "split": {
-    "mode": "ratio",
+    "mode": "none",
     "valid_ratio": 0.2,
     "seed": 20260129,
     "train_trts": [],
@@ -26,29 +26,100 @@
   },
   "params": {
     "bounds": {
-      "sh2o_15": [0.18, 0.28, "g_sh2o"],
-      "sh2o_30": [0.20, 0.30, "g_sh2o"],
-      "p1v": [6.53, 12.13, "g_cul_pheno"],
-      "p1d": [9.18, 17.06, "g_cul_pheno"],
-      "p5": [231.98, 430.82, "g_cul_pheno"],
-      "phint": [60.2, 111.8, "g_cul_pheno"],
-      "g1": [10.0, 15.74, "g_cul_grain"],
-      "g2": [44.44, 80.0, "g_cul_grain"],
-      "g3": [1.55, 2.88, "g_cul_grain"]
+      "sh2o_15": [
+        0.18,
+        0.28,
+        "g_sh2o"
+      ],
+      "sh2o_30": [
+        0.2,
+        0.3,
+        "g_sh2o"
+      ],
+      "p1v": [
+        6.53,
+        12.13,
+        "g_cul_pheno"
+      ],
+      "p1d": [
+        9.18,
+        17.06,
+        "g_cul_pheno"
+      ],
+      "p5": [
+        231.98,
+        430.82,
+        "g_cul_pheno"
+      ],
+      "phint": [
+        60.2,
+        111.8,
+        "g_cul_pheno"
+      ],
+      "g1": [
+        10.0,
+        15.74,
+        "g_cul_grain"
+      ],
+      "g2": [
+        44.44,
+        80.0,
+        "g_cul_grain"
+      ],
+      "g3": [
+        1.55,
+        2.88,
+        "g_cul_grain"
+      ]
     },
     "groups": {
-      "g_sh2o": {"inctyp": "absolute", "derinc": 0.02},
-      "g_cul_pheno": {"inctyp": "relative", "derinc": 0.03},
-      "g_cul_grain": {"inctyp": "relative", "derinc": 0.05}
+      "g_sh2o": {
+        "inctyp": "absolute",
+        "derinc": 0.02
+      },
+      "g_cul_pheno": {
+        "inctyp": "relative",
+        "derinc": 0.03
+      },
+      "g_cul_grain": {
+        "inctyp": "relative",
+        "derinc": 0.05
+      }
     }
   },
   "observations": {
     "groups": {
-      "obs_yield": {"patterns": ["hwam_"], "weight": 1.0},
-      "obs_laix": {"patterns": ["laix_"], "weight": 1.0},
-      "obs_laid": {"patterns": ["laid_"], "weight": 1.0},
-      "obs_swad": {"patterns": ["swad_"], "weight": 1.0}
+      "obs_yield": {
+        "patterns": [
+          "hwam_"
+        ],
+        "weight": 1.0
+      },
+      "obs_laix": {
+        "patterns": [
+          "laix_"
+        ],
+        "weight": 1.0
+      },
+      "obs_laid": {
+        "patterns": [
+          "laid_"
+        ],
+        "weight": 1.0
+      },
+      "obs_swad": {
+        "patterns": [
+          "swad_"
+        ],
+        "weight": 1.0
+      }
     },
     "weights": {}
+  },
+  "optimization": {
+    "mgda": {
+      "trust_rel": 0.3,
+      "start_mode": "random"
+    }
   }
 }

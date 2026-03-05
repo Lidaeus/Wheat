@@ -468,6 +468,10 @@ def _extract_plantgro_vars_at_dates(
             allow_missing = os.environ.get("DSSAT_ALLOW_MISSING_WHT_DATES", "").strip().lower() in {"1", "true", "yes", "y"}
         if not allow_missing:
             raise RuntimeError(f"PlantGro.OUT missing requested dates {missing} in {plantgro_path}")
+        else:
+            # PEST expects an output line to exist for every expected date. Provide zeros if missing.
+            for d in missing:
+                out[int(d)] = {v: 0.0 for v in var_codes}
 
     return out
 
@@ -640,7 +644,11 @@ def main() -> None:
         if k in params:
             cul_updates[k] = float(params[k])
     metrics_cfg = cfg.get("metrics", {}) or cfg.get("variables", {}) or {}
-    yield_code = str(metrics_cfg.get("yield_var", "HWAM")).strip().upper()
+    
+    # Abstract yields
+    yield_var_cfg = str(metrics_cfg.get("yield_var", "YIELD")).strip().upper()
+    yield_code = yield_var_cfg if yield_var_cfg != "YIELD" else "HWAM"
+    
     laix_code = str(metrics_cfg.get("laix_var", "LAIX")).strip().upper()
     cfg_paths = cfg.get("paths", {})
     a_path_env = os.environ.get("DSSAT_OBS_A_PATH") if "DSSAT_OBS_A_PATH" in os.environ else None
@@ -678,6 +686,9 @@ def main() -> None:
         except Exception:
             yield_code = ""
             laix_code = ""
+    
+    # In run_model.py, we still use the configured names (or HWAM fallback) to query dssat_io. 
+    # dssat_io's pick_eval_value will handle the HWAM -> CWAM -> PRCM internal fallback.
     var_codes = [c for c in [yield_code, laix_code] if c]
     allow_missing_dates = os.environ.get("DSSAT_ALLOW_MISSING_WHT_DATES", "").strip().lower() in {"1", "true", "yes", "y"}
     if not allow_missing_dates:

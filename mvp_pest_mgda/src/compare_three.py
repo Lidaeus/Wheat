@@ -84,6 +84,11 @@ def _resolve_split(cfg: dict, trts: list[int]) -> dict[int, str]:
     split_cfg = cfg.get("split", {})
     mode = str(split_cfg.get("mode", "trt")).strip().lower()
     all_trts = [int(t) for t in trts]
+
+    # mode='none' or 'all' → every TRT is training, no validation
+    if mode in {"none", "all"}:
+        return {int(t): "train" for t in all_trts}
+
     train = {int(t) for t in (split_cfg.get("train_trts") or []) if str(t).strip()}
     valid = {int(t) for t in (split_cfg.get("valid_trts") or []) if str(t).strip()}
 
@@ -158,6 +163,7 @@ def _calc_summary(rows: list[TrtRow]) -> dict[str, float | int]:
             "rrmse_yield": float("nan"),
             "mae_yield": float("nan"),
             "r2_yield": float("nan"),
+            "nse_yield": float("nan"),
             "nrmse_mean_yield": float("nan"),
             "nrmse_range_yield": float("nan"),
             "dindex_yield": float("nan"),
@@ -165,6 +171,7 @@ def _calc_summary(rows: list[TrtRow]) -> dict[str, float | int]:
             "rrmse_laix": float("nan"),
             "mae_laix": float("nan"),
             "r2_laix": float("nan"),
+            "nse_laix": float("nan"),
             "nrmse_mean_laix": float("nan"),
             "nrmse_range_laix": float("nan"),
             "dindex_laix": float("nan"),
@@ -236,6 +243,8 @@ def _calc_summary(rows: list[TrtRow]) -> dict[str, float | int]:
         else 0.0
     )
     dindex_l = 1.0 - (ssr_l / denom_l) if denom_l > 0.0 else float("nan")
+    nse_y = (1.0 - ssr_y / sst_y) if sst_y > 0.0 else float("nan")
+    nse_l = (1.0 - ssr_l / sst_l) if sst_l > 0.0 else float("nan")
     n_wht = sum(r["n_wht_dates"] for r in rows)
     n_wht_lwad = sum(r["n_wht_lwad"] for r in rows)
     n_wht_swad = sum(r["n_wht_swad"] for r in rows)
@@ -253,6 +262,7 @@ def _calc_summary(rows: list[TrtRow]) -> dict[str, float | int]:
         "rrmse_yield": rrmse_y,
         "mae_yield": mae_y,
         "r2_yield": r2_y,
+        "nse_yield": nse_y,
         "nrmse_mean_yield": nrmse_mean_y,
         "nrmse_range_yield": nrmse_range_y,
         "dindex_yield": dindex_y,
@@ -260,6 +270,7 @@ def _calc_summary(rows: list[TrtRow]) -> dict[str, float | int]:
         "rrmse_laix": rrmse_l,
         "mae_laix": mae_l,
         "r2_laix": r2_l,
+        "nse_laix": nse_l,
         "nrmse_mean_laix": nrmse_mean_l,
         "nrmse_range_laix": nrmse_range_l,
         "dindex_laix": dindex_l,
