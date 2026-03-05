@@ -1,0 +1,54 @@
+
+group id: -1
+G1,1
+G2,3
+G3,4
+P1D,5
+P1V,2
+P5,7
+PHINT,6
+
+group id: -1
+G1,1
+G2,3
+G3,4
+P1D,5
+P1V,2
+P5,7
+PHINT,6
+
+group id: -1
+G1,1
+G2,2
+G3,4
+P1D,5
+P1V,3
+P5,6
+PHINT,7
+
+group id: -1
+G1,1
+G2,2
+G3,4
+P1D,5
+P1V,3
+P5,6
+PHINT,7
+
+group id: -1
+G1,1,2
+G2,3,4
+G3,7,8
+P1D,9,10
+P1V,5,6
+P5,11,12
+PHINT,13,14
+
+group id: -1
+G1,1,2
+G2,3,4
+G3,7,8
+P1D,9,10
+P1V,5,6
+P5,11,12
+PHINT,13,14

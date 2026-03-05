@@ -9,11 +9,11 @@
   "scenario": {
     "filex": "SWSW7501.WHX",
     "base_filex": "SWSW7501.WHX",
-    "trts": []
+    "trts": [1, 2, 3, 4, 8, 9, 10, 11]
   },
   "adapter": {
-    "wth_path": "",
     "sol_path": "",
+    "wth_path": "",
     "wth_updates": [],
     "sol_updates": []
   },
@@ -26,100 +26,34 @@
   },
   "params": {
     "bounds": {
-      "sh2o_15": [
-        0.18,
-        0.28,
-        "g_sh2o"
-      ],
-      "sh2o_30": [
-        0.2,
-        0.3,
-        "g_sh2o"
-      ],
-      "p1v": [
-        6.53,
-        12.13,
-        "g_cul_pheno"
-      ],
-      "p1d": [
-        9.18,
-        17.06,
-        "g_cul_pheno"
-      ],
-      "p5": [
-        231.98,
-        430.82,
-        "g_cul_pheno"
-      ],
-      "phint": [
-        60.2,
-        111.8,
-        "g_cul_pheno"
-      ],
-      "g1": [
-        10.0,
-        15.74,
-        "g_cul_grain"
-      ],
-      "g2": [
-        44.44,
-        80.0,
-        "g_cul_grain"
-      ],
-      "g3": [
-        1.55,
-        2.88,
-        "g_cul_grain"
-      ]
+      "p1v": [5.0, 15.0, "g_cul_pheno"],
+      "p1d": [0.0, 10.0, "g_cul_pheno"],
+      "p5": [200.0, 500.0, "g_cul_pheno"],
+      "phint": [50.0, 120.0, "g_cul_pheno"],
+      "g1": [5.0, 30.0, "g_cul_grain"],
+      "g2": [30.0, 80.0, "g_cul_grain"],
+      "g3": [0.5, 5.0, "g_cul_grain"]
     },
     "groups": {
-      "g_sh2o": {
-        "inctyp": "absolute",
-        "derinc": 0.02
-      },
-      "g_cul_pheno": {
-        "inctyp": "relative",
-        "derinc": 0.03
-      },
-      "g_cul_grain": {
-        "inctyp": "relative",
-        "derinc": 0.05
-      }
+      "g_cul_pheno": {"inctyp": "relative", "derinc": 0.03},
+      "g_cul_grain": {"inctyp": "relative", "derinc": 0.05}
     }
   },
   "observations": {
     "groups": {
-      "obs_yield": {
-        "patterns": [
-          "hwam_"
-        ],
-        "weight": 1.0
-      },
-      "obs_laix": {
-        "patterns": [
-          "laix_"
-        ],
-        "weight": 1.0
-      },
-      "obs_laid": {
-        "patterns": [
-          "laid_"
-        ],
-        "weight": 1.0
-      },
-      "obs_swad": {
-        "patterns": [
-          "swad_"
-        ],
-        "weight": 1.0
-      }
+      "obs_yield": {"patterns": ["hwam_"], "weight": 1.0},
+      "obs_laix": {"patterns": ["laix_"], "weight": 1.0},
+      "obs_laid": {"patterns": ["laid_"], "weight": 1.0},
+      "obs_swad": {"patterns": ["swad_"], "weight": 1.0}
     },
     "weights": {}
   },
   "optimization": {
     "mgda": {
-      "trust_rel": 0.3,
-      "start_mode": "random"
+      "trust_rel": 0.1,
+      "start_mode": "",
+      "loss_type": "huber",
+      "huber_delta": 1.0
     }
   }
 }

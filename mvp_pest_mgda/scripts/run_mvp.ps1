@@ -1013,6 +1013,24 @@ $iterMax = [int]$iterMaxRaw
             else {
                 Write-Host ("[NOPTMAX={0}] [{1}/{2}] [3/5] Compute MGDA parameter update" -f @($nopt, ($iter + 1), $iterMax)) -ForegroundColor Cyan
                 Set-IterStage -Iter $iter -Stage 'mgda_update' -Status 'start' -IterDir $iterDir
+                
+                if ($iter -gt 0) {
+                    $prevIterKey = Get-IterKey ($iter - 1)
+                    $prevIterDir = Join-Path $workDir $prevIterKey
+                    
+                    # 传递自适应步长
+                    $prevStepNext = Join-Path $prevIterDir "step_next.txt"
+                    if (Test-Path -LiteralPath $prevStepNext) {
+                        Copy-Item -LiteralPath $prevStepNext -Destination (Join-Path $iterDir "step.txt") -Force
+                    }
+
+                    # --- 闭环反馈：传递 MGDA Alpha 权重 ---
+                    $prevAlphas = Join-Path $prevIterDir "mgda_alphas.json"
+                    if (Test-Path -LiteralPath $prevAlphas) {
+                        Copy-Item -LiteralPath $prevAlphas -Destination (Join-Path $iterDir "mgda_alphas.json") -Force
+                    }
+                }
+
                 if ($mgdaAdapt) {
                     $env:MGDA_TRUST_REL = [string]$mgdaTrustRel
                     $env:MGDA_REG_LAMBDA = [string]$mgdaRegLambda
@@ -1036,6 +1054,9 @@ $iterMax = [int]$iterMaxRaw
                 Copy-Item -LiteralPath (Join-Path $iterDir "params_mgda.dat") -Destination (Join-Path $iterDir "params_next.dat") -Force
                 Copy-Item -LiteralPath (Join-Path $iterDir "params_mgda.dat") -Destination (Join-Path $iterMgdaDir "params_mgda.dat") -Force
                 Copy-Item -LiteralPath (Join-Path $iterDir "mgda_report.txt") -Destination (Join-Path $iterMgdaDir "mgda_report.txt") -Force
+                if (Test-Path -LiteralPath (Join-Path $iterDir "step_next.txt")) {
+                    Copy-Item -LiteralPath (Join-Path $iterDir "step_next.txt") -Destination (Join-Path $iterMgdaDir "step_next.txt") -Force
+                }
                 Set-IterStage -Iter $iter -Stage 'mgda_update' -Status 'done' -IterDir $iterDir
                 $mgdaRanThisIter = $true
                 if ($mgdaOnlyActive -and $mgdaOnlyRemaining -gt 0) { $mgdaOnlyRemaining -= 1 }

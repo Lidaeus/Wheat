@@ -739,25 +739,24 @@ def main() -> None:
     pst.control_data.noptmax = int(os.environ.get("PEST_NOPTMAX", "10"))
     pst.control_data.pestmode = "estimation"
 
-    bounds = {
-        "sh2o_15": (0.05, 0.40, "g_sh2o"),
-        "sh2o_30": (0.05, 0.40, "g_sh2o"),
-        "p1v": (0.0, 60.0, "g_cul_pheno"),
-        "p1d": (0.0, 200.0, "g_cul_pheno"),
-        "p5": (100.0, 999.0, "g_cul_pheno"),
-        "phint": (30.0, 150.0, "g_cul_pheno"),
-        "g1": (10.0, 50.0, "g_cul_grain"),
-        "g2": (10.0, 80.0, "g_cul_grain"),
-        "g3": (0.5, 8.0, "g_cul_grain"),
-    }
-    cfg_bounds = cfg.get("params", {}).get("bounds", {})
+    # Define parameters from configuration (mandatory)
+    # The config 'bounds' keys should match the DSSAT header names (case-insensitive)
+    pst_bounds: dict[str, tuple[float, float, str]] = {}
+    cfg_params = cfg.get("params", {})
+    cfg_bounds = cfg_params.get("bounds", {})
+    
+    if not cfg_bounds:
+        raise RuntimeError("No parameter bounds defined in project config")
+
     for k, v in cfg_bounds.items():
         if isinstance(v, (list, tuple)) and len(v) >= 3:
             k_l = str(k).strip().lower()
             mapped = param_map.get(k_l, k_l)
-            bounds[mapped] = (float(v[0]), float(v[1]), str(v[2]))
+            pst_bounds[mapped] = (float(v[0]), float(v[1]), str(v[2]))
+        else:
+            print(f"Warning: Invalid bound format for parameter {k}, expected [lb, ub, group]")
 
-    for p, (lb, ub, grp) in bounds.items():
+    for p, (lb, ub, grp) in pst_bounds.items():
         if p not in pst.parameter_data.index:
             continue
         pst.parameter_data.loc[p, "parlbnd"] = lb
@@ -779,17 +778,14 @@ def main() -> None:
         "splitaction": "smaller",
     }
 
-    group_specs = {
-        "g_sh2o": ("absolute", 0.02),
-        "g_cul_pheno": ("relative", 0.03),
-        "g_cul_grain": ("relative", 0.05),
-    }
-    cfg_groups = cfg.get("params", {}).get("groups", {})
+    # Define parameter groups from configuration
+    pst_group_specs: dict[str, tuple[str, float]] = {}
+    cfg_groups = cfg_params.get("groups", {})
     for g, spec in cfg_groups.items():
         if isinstance(spec, dict) and "inctyp" in spec and "derinc" in spec:
-            group_specs[str(g)] = (str(spec["inctyp"]), float(spec["derinc"]))
+            pst_group_specs[str(g)] = (str(spec["inctyp"]), float(spec["derinc"]))
 
-    for grp, (inctyp, derinc) in group_specs.items():
+    for grp, (inctyp, derinc) in pst_group_specs.items():
         if grp not in pst.parameter_groups.index:
             pst.parameter_groups.loc[grp, :] = base_group
             pst.parameter_groups.loc[grp, "pargpnme"] = grp
@@ -805,35 +801,70 @@ def main() -> None:
     cfg_obs = cfg.get("observations", {})
     group_defs = cfg_obs.get("groups", {})
     weights_overrides = {str(k).strip().lower(): float(v) for k, v in cfg_obs.get("weights", {}).items()}
-    mgda_cfg = (cfg.get("optimization", {}) or {}).get("mgda", {}) or {}
-    sigma_prewhiten = bool(cfg_obs.get("sigma_prewhiten", mgda_cfg.get("sigma_prewhiten", mgda_cfg.get("sigma_whiten", False))))
+    
+    # 深度对齐设计：强制 PEST 权重 = 1 / sigma
+    # 这样 PEST 算出的梯度模长与 MGDA 各组的模长就处于同一个量级，消除梯度霸凌。
     split_by_trt = _resolve_split(cfg, trts)
     yield_prefix = str(yield_var).strip().lower() if yield_var else ""
     laix_prefix = str(laix_var).strip().lower() if laix_var else ""
+    
+    # 计算观测值的先验方差（基于 train 集）
     group_variances = _calc_group_variances(meas, split_by_trt, group_defs, yield_prefix, laix_prefix)
     group_weights: dict[str, float] = {}
+    
+    # 尝试加载 MGDA 的反馈 Alpha 权重
+    mgda_alphas: dict[str, float] = {}
+    alpha_path = cwd / "mgda_alphas.json"
+    if alpha_path.exists():
+        try:
+            mgda_alphas = json.loads(alpha_path.read_text(encoding="utf-8"))
+            print(f"Applying MGDA Alpha-Feedback: {mgda_alphas}")
+        except Exception as e:
+            print(f"Warning: Could not read feedback alphas: {e}")
+
+    active_alpha_groups = list(mgda_alphas.keys())
+    n_alpha = len(active_alpha_groups)
+
     for gname, var in group_variances.items():
-        fallback = float(group_defs.get(gname, {}).get("weight", 1.0))
-        if math.isfinite(var) and var > 0.0:
-            base = float(1.0 / var)
+        # 获取配置中的基础权重（作为兜底）
+        fallback_w = float(group_defs.get(gname, {}).get("weight", 1.0))
+        # 获取配置中的先验 sigma
+        cfg_sigma = float(group_defs.get(gname, {}).get("sigma", 1.0))
+        
+        # 核心逻辑：若能从数据算对方差，则优先使用 1/std；否则使用配置的 1/sigma
+        std = math.sqrt(var) if (math.isfinite(var) and var > 0.0) else cfg_sigma
+        
+        if std > 0:
+            # 基础权重对齐：w = 1 / std
+            base_w = 1.0 / std
+            
+            # --- 闭环反馈：Alpha 调制 ---
+            # 如果 MGDA 认为这组目标很重要 (Alpha 高)，则进一步增加其在 PEST 里的权重
+            # w_new = base_w * sqrt(alpha * N)
+            if gname in mgda_alphas:
+                alpha = float(mgda_alphas[gname])
+                # 根号是因为 PEST 的贡献是 (w*r)^2，这样贡献就正比于 alpha
+                # 乘以 n_alpha 是为了保持总权重数量级不变
+                modulation = math.sqrt(alpha * n_alpha)
+                group_weights[gname] = base_w * modulation
+            else:
+                group_weights[gname] = base_w
         else:
-            base = float(fallback)
-        if sigma_prewhiten:
-            try:
-                sigma = float(group_defs.get(gname, {}).get("sigma", 1.0))
-            except (TypeError, ValueError):
-                sigma = 1.0
-            if math.isfinite(sigma) and sigma > 0.0:
-                base = float(base / (sigma * sigma))
-        group_weights[gname] = float(base)
+            group_weights[gname] = fallback_w
 
     for oname in pst.observation_data.index.astype(str).tolist():
         name_l = oname.lower()
         gname = _resolve_obs_group_name(oname, group_defs, yield_prefix, laix_prefix)
         pst.observation_data.loc[oname, "obgnme"] = str(gname)
+        
+        # 应用对齐后的权重
         pst.observation_data.loc[oname, "weight"] = float(group_weights.get(gname, 1.0))
+        
+        # 允许个别点的特殊覆盖
         if name_l in weights_overrides:
             pst.observation_data.loc[oname, "weight"] = float(weights_overrides[name_l])
+            
+        # 验证集和缺失值权重设为 0
         trt = _extract_trt_from_obs_name(oname)
         if (trt is not None) and (split_by_trt.get(int(trt)) == "valid"):
             pst.observation_data.loc[oname, "weight"] = 0.0

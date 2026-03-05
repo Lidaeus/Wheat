@@ -202,18 +202,23 @@ def _calc_phi(
     pst: pyemu.Pst, 
     sim: dict[str, float], 
     cfg: dict, 
-    group_obs_std: dict[str, float], 
-    group_sizes: dict[str, int]
+    group_sizes: dict[str, int],
+    loss_type: str = "mse",
+    huber_delta: float = 1.0
 ) -> float:
+    """
+    计算加权目标函数 Phi。
+    深度对齐：直接使用 pst.observation_data.weight (即 1/sigma)
+    """
     obs = pst.observation_data
     phi = 0.0
     
-    # 按照在 main 里计算的方式使用 Z-Score normalization 计算无量纲的总合 phi
     for oname, row in obs.iterrows():
         k = str(oname).strip().lower()
         if k not in sim:
             continue
         try:
+            # 深度对齐：直接读取 PEST 控制文件中的权重 (w = 1/sigma)
             w = float(row.weight)
             o = float(row.obsval)
         except Exception:
@@ -221,20 +226,23 @@ def _calc_phi(
             
         e = float(sim[k]) - o
         
-        # 寻找对应的组和对应的 sigma_obs
+        # 寻找对应的组
         gn = _resolve_obs_group_name(k, "obs", cfg)
-        sigma_obs = float(group_obs_std.get(gn, 1.0))
         size = float(group_sizes.get(gn, 1.0))
         if size <= 0.0:
             size = 1.0
             
-        # 归一化误差：e_norm = (e / sigma_obs) / sqrt(size) -> 也就是在累加前进行 1/size 放缩，
-        # 和梯度的 / size 保持平衡，避免大组误差霸凌。 另外自带 w.
-        # 但在这个 _calc_phi 我们只提供给 Backtrack 判定总方向是否改善。
-        # 为了与梯度的下降量级一致：(e * w / sigma_obs)^2 / size
-        # 这样不同量纲、不同组大小的目标就完全拉平了。
-        e_norm = (e * w / sigma_obs)
-        phi += (e_norm ** 2) / size
+        # 归一化误差：e_norm = e * w = e / sigma
+        e_norm = (e * w)
+        
+        if loss_type == "huber":
+            abs_e = abs(e_norm)
+            if abs_e <= huber_delta:
+                phi += (0.5 * (e_norm ** 2)) / size
+            else:
+                phi += (huber_delta * (abs_e - 0.5 * huber_delta)) / size
+        else:
+            phi += (0.5 * (e_norm ** 2)) / size
         
     return float(phi)
 
@@ -245,8 +253,9 @@ def _evaluate_phi(
     run_model_path: Path, 
     params: dict[str, float],
     cfg: dict,
-    group_obs_std: dict[str, float],
     group_sizes: dict[str, int],
+    loss_type: str = "mse",
+    huber_delta: float = 1.0
 ) -> float:
     eval_params_path = work_dir / "_mgda_eval_params.dat"
     _write_params_dat(eval_params_path, params)
@@ -265,7 +274,7 @@ def _evaluate_phi(
         raise RuntimeError(f"run_model.py failed: {cp.returncode}\nSTDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}")
 
     sim = _read_kv_out(work_dir / "pest_out.dat")
-    return _calc_phi(pst, sim, cfg, group_obs_std, group_sizes)
+    return _calc_phi(pst, sim, cfg, group_sizes, loss_type, huber_delta)
 
 
 def _write_params_dat(path: Path, params: dict[str, float]) -> None:
@@ -375,27 +384,14 @@ def main() -> None:
             continue
         group_index.setdefault(gn, []).append(i)
 
-    weight_eps = float(os.environ.get("MGDA_WEIGHT_EPS", "1e-6"))
-    group_obs_std: dict[str, float] = {}
-    for gn, idx in group_index.items():
-        fallback = float(group_defs.get(gn, {}).get("weight", 1.0))
-        if idx and len(idx) > 1:
-            obs_vals = obs.obsval.iloc[idx].to_numpy(dtype=float)
-            stdev = float(np.std(obs_vals, ddof=1))
-            if math.isfinite(stdev) and stdev > weight_eps:
-                group_obs_std[gn] = stdev
-            else:
-                mean_val = float(np.mean(obs_vals))
-                group_obs_std[gn] = abs(mean_val) if abs(mean_val) > weight_eps else 1.0
-        elif idx:
-            val = float(obs.obsval.iloc[idx[0]])
-            group_obs_std[gn] = abs(val) if abs(val) > weight_eps else 1.0
-        else:
-            group_obs_std[gn] = 1.0
-
+    # 深度对齐：不再动态计算 group_obs_std，直接信任 PEST 控制文件中的权重
     mgda_cfg = cfg.get("optimization", {}).get("mgda", {})
     sigma_whiten = bool(mgda_cfg.get("sigma_prewhiten", mgda_cfg.get("sigma_whiten", False)))
     norm_strategy = str(mgda_cfg.get("normalize", "l2")).strip().lower()
+
+    # Loss settings (MSE or Huber)
+    loss_type = str(mgda_cfg.get("loss_type", os.environ.get("MGDA_LOSS_TYPE", "mse"))).strip().lower()
+    huber_delta = float(mgda_cfg.get("huber_delta", os.environ.get("MGDA_HUBER_DELTA", "1.0")))
 
     # Time-decay settings
     time_decay_cfg = mgda_cfg.get("time_decay", {})
@@ -444,14 +440,20 @@ def main() -> None:
                     # Logistic bounded decay: w_base + (w_max - w_base) / (1 + exp(-k * (t - t_mid)))
                     decay_weights[j] = w_base + (w_max - w_base) / (1.0 + math.exp(-k_slope * (float(d) - local_t_mid)))
         
-        # Z-Score normalization denominator (sigma_obs)
-        sigma_obs = float(group_obs_std.get(gn, 1.0))
+        # 深度对齐：直接从 PEST 提取权重 (w = 1/sigma)
+        w_pest = obs.weight.iloc[idx].to_numpy(dtype=float)
         
-        # Apply time decay and normalization to residual AND Jacobian to obey chain rule
-        w_factor = decay_weights / sigma_obs
+        # 应用时间加权和 PEST 预设权重
+        # r = (sim - obs) * w_pest * decay_weights
+        w_factor = decay_weights * w_pest
         r = r * w_factor
         Jg = Jg * w_factor[:, np.newaxis]
         
+        # Apply robust loss gradient clipping
+        if loss_type == "huber":
+            mask = np.abs(r) > huber_delta
+            r[mask] = huber_delta * np.sign(r[mask])
+
         if sigma_whiten and math.isfinite(sigma) and sigma != 1.0:
             r = r / sigma
             Jg = Jg / sigma
@@ -462,8 +464,8 @@ def main() -> None:
         else:
             g = np.zeros(Jg.shape[1], dtype=float)
             
-        w = float(group_defs.get(gn, {}).get("weight", 1.0))
-        g = g * w
+        w_group = float(group_defs.get(gn, {}).get("weight", 1.0))
+        g = g * w_group
         eff_n = spec.get("eff_n", None)
         if eff_n is not None:
             try:
@@ -479,7 +481,7 @@ def main() -> None:
         raw_norms[gn] = ng
         group_sizes[gn] = size
         group_sigmas[gn] = float(sigma) if sigma_whiten else float("nan")
-        applied_weights[gn] = w
+        applied_weights[gn] = w_group
         group_effn[gn] = float(eff_n) if eff_n is not None else float("nan")
         if ng <= near_zero_eps or not math.isfinite(ng):
             near_zero_groups.append(gn)
@@ -488,7 +490,7 @@ def main() -> None:
         if norm_strategy == "l2":
             g = g / ng
             # Apply dynamic weight AFTER normalization so it's not cancelled out
-            g = g * w
+            g = g * w_group
         post_norms[gn] = float(np.linalg.norm(g))
         if float(np.linalg.norm(g)) > 0.0 and all(math.isfinite(x) for x in g):
             groups.append((gn, g))
@@ -560,7 +562,7 @@ def main() -> None:
 
     if safe:
         run_model_path = Path(__file__).resolve().parents[1] / "src" / "run_model.py"
-        phi0 = _evaluate_phi(cwd, pst, run_model_path, p0, cfg, group_obs_std, group_sizes)
+        phi0 = _evaluate_phi(cwd, pst, run_model_path, p0, cfg, group_sizes, loss_type, huber_delta)
         phi_tol = float(os.environ.get("MGDA_PHI_TOL", "0.0"))
         max_back = int(os.environ.get("MGDA_MAX_BACKTRACK", "8"))
         accepted = False
@@ -571,7 +573,7 @@ def main() -> None:
             x1 = np.clip(x0 + delta, 0.0, 1.0)
             cand = {p: float(lb[p] + x1[i] * (ub[p] - lb[p])) for i, p in enumerate(par_names)}
             try:
-                phi_c = _evaluate_phi(cwd, pst, run_model_path, cand, cfg, group_obs_std, group_sizes)
+                phi_c = _evaluate_phi(cwd, pst, run_model_path, cand, cfg, group_sizes, loss_type, huber_delta)
             except Exception:
                 phi_c = float("inf")
             if math.isfinite(phi_c) and phi_c <= phi0 * (1.0 + phi_tol):
@@ -616,12 +618,22 @@ def main() -> None:
                     c = float(np.clip((gi @ gj) / (ni * nj), -1.0, 1.0))
                     ang = float(math.degrees(math.acos(c)))
                     ang_lines += f"angle[{keys[i]},{keys[j]}]={ang:.6f}\n"
+
+    # Export alphas for feedback loop
+    alpha_json_path = cwd / "mgda_alphas.json"
+    try:
+        alpha_json_path.write_text(json.dumps(alpha_by_group, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"Warning: Could not write mgda_alphas.json: {e}")
+
     (cwd / "mgda_report.txt").write_text(
         ("status=updated\n" if accepted else "status=rejected\n")
         + f"p0_source={p0_src}\n"
         + f"safe_step={int(safe)}\n"
         + f"trust_rel={trust_rel:.6f}\n"
         + (f"reg_lambda={reg_lambda:.6f}\n" if reg_lambda > 0.0 else "")
+        + (f"loss_type={loss_type}\n")
+        + (f"huber_delta={huber_delta:.6f}\n" if loss_type == "huber" else "")
         + (f"phi0={phi0:.6f}\n" if math.isfinite(phi0) else "")
         + (f"phi1={phi1:.6f}\n" if math.isfinite(phi1) else "")
         + (f"backtracks={backtracks}\n" if safe else "")
@@ -646,6 +658,14 @@ def main() -> None:
         + "\n",
         encoding="utf-8",
     )
+
+    if accepted and step > 0:
+        # Heuristic expansion: if we succeeded with 0 or 1 backtracks, try a larger step next time.
+        # If we struggled (backtracks >= 2), stay at the successful step size.
+        next_step = step
+        if backtracks <= 1:
+            next_step = step * 1.5
+        (cwd / "step_next.txt").write_text(f"{next_step:.6f}\n", encoding="utf-8")
 
 
 if __name__ == "__main__":
