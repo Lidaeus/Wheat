@@ -335,3 +335,25 @@ Final_Score: 0.547266
 ```
 </details>
 
+### Strategy: Pure_MGDA_Baseline
+**Score:** 0.319164
+<details><summary>Output</summary>
+
+```
+Starting Official DSSAT-based Optimization Evaluation...
+Current EVAL_MODE: pure_mgda
+Optimization Success: True
+Final Parameters:
+  P1V: 16.29
+  P1D: 67.29
+  P5: 388.16
+  G1: 19.91
+  G2: 55.45
+  G3: 0.85
+  PHINT: 87.36
+Final_Loss_Value: 0.650011
+Final_Score: 0.319164
+
+```
+</details>
+
