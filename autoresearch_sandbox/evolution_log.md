@@ -404,3 +404,27 @@ Final_Score: 0.383784
 ```
 </details>
 
+### Strategy: Grouped_PEST_GLM
+**Score:** 0.328667
+<details><summary>Output</summary>
+
+```
+Starting Official DSSAT-based Optimization Evaluation...
+Current EVAL_MODE: pest_glm_grouped
+Running PEST-GLM (Levenberg-Marquardt / TRF)...
+Least Squares Status: 3, Message: `xtol` termination condition is satisfied.
+Optimization Success: True
+Final Parameters:
+  P1V: 12.70
+  P1D: 40.25
+  P5: 446.35
+  G1: 18.26
+  G2: 62.86
+  G3: 1.82
+  PHINT: 82.12
+Final_Loss_Value: 0.591290
+Final_Score: 0.328667
+
+```
+</details>
+
