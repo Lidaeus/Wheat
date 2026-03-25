@@ -1,0 +1,63 @@
+{
+  "paths": {
+    "dssat_case_dir": "C:\\DSSAT48\\Wheat",
+    "wha_path": "C:\\DSSAT48\\Wheat\\SWSW7501.WHA",
+    "wht_path": "C:\\DSSAT48\\Wheat\\SWSW7501.WHT",
+    "obs_a_path": "C:\\DSSAT48\\Wheat\\SWSW7501.WHA",
+    "obs_t_path": "C:\\DSSAT48\\Wheat\\SWSW7501.WHT",
+    "cul_path": "C:\\DSSAT48\\Genotype\\WHCER048.CUL",
+    "dssat_exe": "C:\\DSSAT48\\DSCSM048.EXE"
+  },
+  "scenario": {
+    "filex": "SWSW7501.WHX",
+    "base_filex": "SWSW7501.WHX",
+    "trts": [1, 2, 8, 9, 13, 14]
+  },
+  "adapter": {
+    "wth_path": "",
+    "sol_path": "",
+    "wth_updates": [],
+    "sol_updates": []
+  },
+  "split": {
+    "mode": "ratio",
+    "valid_ratio": 0.2,
+    "seed": 20260210,
+    "train_trts": [],
+    "valid_trts": []
+  },
+  "params": {
+    "bounds": {
+      "p1v": [5.0, 60.0, "g_cul"],
+      "p1d": [0.0, 95.0, "g_cul"],
+      "p5": [550.0, 999.0, "g_cul"],
+      "g1": [5.0, 30.0, "g_cul"],
+      "g2": [30.0, 60.0, "g_cul"],
+      "g3": [0.5, 2.1, "g_cul"],
+      "phint": [95.0, 167.0, "g_cul"]
+    },
+    "importance_exponent": {
+      "yield": 10,
+      "lai": 1,
+      "adap": 8,
+      "mdap": 8
+    },
+    "groups": {
+      "g_cul": {
+        "inctyp": "relative",
+        "derinc": 0.05
+      }
+    }
+  },
+  "metrics": {
+    "yield_var": "HWAM",
+    "laix_var": "LAIX"
+  },
+  "observations": {
+    "allow_missing_obs_files": true,
+    "groups": {
+      "obs_yield": {"patterns": ["hwam_"], "weight": 1.0},
+      "obs_laix": {"patterns": ["laix_"], "weight": 1.0}
+    }
+  }
+}

@@ -1,0 +1,99 @@
+*EXP.DETAILS: SIAZ9501MZ 1995 SIA EXPERIMENT, ZARAGOSA, SPAIN                        
+
+*FILES
+@N  EXP.DATA    AFILE        ADIR
+  1 EXP         SIAZ9501.MZA C:\DSSAT46\maize\                                                               
+@N  SPECIES     SPFILE       SPDIR
+  1 SPE         MZCER046.SPE C:\DSSAT46\GENOTYPE\                                                            
+@N  ECOTYPE     EFILE        EDIR
+  1 ECO         MZCER046.ECO C:\DSSAT46\GENOTYPE\                                                            
+@N  CULTIVAR    CFILE        CDIR
+  1 CUL         MZCER046.CUL C:\DSSAT46\GENOTYPE\                                                            
+@N  SOIL        SFILE        SDIR
+  1 SOIL        SI.SOL       C:\DSSAT46\SOIL\                                                                
+@N  WEATHER     WFILE        WDIR
+  1 WEATH       SIAZ9501.WTH C:\DSSAT46\Weather\                                                             
+
+*SIMULATION CONTROL
+@N  GENERAL     NYERS NREPS START   SDATE RSEED SNAME.................... MODEL...
+  1 GE              1     1     S 1995136  2150 ZARAGOSA, SPAIN, 1995, 9  MZCER046
+@N  OPTIONS     WATER NITRO SYMBI PHOSP POTAS DISES  CHEM  TILL   CO2
+  1 OP              Y     Y     N     N     N     N     N     Y     M
+@N  METHODS     WTHER INCON LIGHT EVAPO INFIL PHOTO HYDRO NSWIT SOMDY MESEV MESOL METMP
+  1 ME              M     M     E     R     S     R     R     1     G     S     2     D
+@N  MANAGEMENT  PLANT IRRIG FERTI RESID HARVS
+  1 MA              R     R     R     R     M
+@N  OUTPUTS     FNAME OVVEW SUMRY FROPT GROUT CAOUT WAOUT NIOUT MIOUT DIOUT  LONG CHOUT OPOUT
+  1 OU              N     Y     Y     1     Y     N     Y     Y     N     N     Y     N     N
+
+!AUTOMATIC MANAGEM
+@N  PLANTING      PFRST   PLAST PH2OL PH2OU PH2OD PSTMX PSTMN
+  1 PL          1995130 1995144   40.  100.   30.   40.   10.
+@N  IRRIGATION  IMDEP ITHRL ITHRU IROFF IMETH IRAMT IREFF
+  1 IR            30.   50.  100. GS000 IR001  10.0 1.000
+@N  NITROGEN    NMDEP NMTHR NAMNT NCODE NAOFF
+  1 NI            30.   50.   25. FE001 GS000
+@N  RESIDUES    RIPCN RTIME RIDEP
+  1 RE           100.     1   20.
+@N  HARVEST     HFRST   HLAST HPCNP HRCNR
+  1 HA              0 1996137  100.    0.
+
+*TREATMENTS
+@N   R O C TNAME....................  CU  FL  SA  IC  MP  MI  MF  MR  MC  MT  ME  MH  SM
+  2  0 0 0 iii - 50% FULL IRRIGATION   1   1   0   1   1   2   1   0   0   0   0   0   1
+
+*CULTIVARS
+@C  CR INGENO CNAME
+  1 MZ ZA0002 Prisma GC Avg   
+
+*FIELDS
+@L  ID_FIELD WSTA....  FLSA  FLOB  FLDT  FLDD  FLDS  FLST SLTX   SLDP ID_SOIL
+  1 SIAZ0001 SIAZ9501   0.0    0. DR000    0.  100. 00000 L      150. SIAZ950001
+@L             XCRD            YCRD      ELEV              AREA  SLEN  FLWR  SLAS PRMGT
+  1         0.00000         0.00000      0.00               1.0  100.   1.0   0.0   -99   -99
+
+*INITIAL CONDITIONS
+@C  PCR     ICDAT  ICRT  ICND  ICRN  ICRE  ICWD ICRES ICREN ICREP ICRIP ICRID
+  1 MZ    1995137   100     0  1.00  1.00   0.0     0  0.00  0.00  100.   15.
+@C   ICBL  SH2O  SNH4  SNO3
+  1    5. 0.203   0.2   2.1
+  1   15. 0.203   0.2   2.1
+  1   30. 0.203   0.2   2.1
+  1   45. 0.282   0.2   1.1
+  1   60. 0.282   0.2   1.1
+  1   70. 0.223   0.2   0.9
+  1   80. 0.223   0.2   0.9
+
+*PLANTING DETAILS
+@P    PDATE   EDATE  PPOP  PPOE  PLME  PLDS  PLRS  PLRD  PLDP  PLWT  PAGE  PENV  PLPH  SPRL
+  1 1995137 1995145   8.0   8.0     S     R    1.    0.   3.0  -99.  -99. -99.0   1.0   0.0
+
+*IRRIGATION
+@I   IEFF  IDEP  ITHR  IEPT  IOFF  IAME  IAMT
+  2 1.000   30.   50.  100. GS000 IR001  10.0
+@I    IDATE  IROP IRVAL
+  2 1995165 IR001  79.0
+  2 1995188 IR001  61.0
+  2 1995209 IR001  65.0
+  2 1995234 IR001  60.0
+  2 1995262 IR001  56.0
+
+*FERTILIZERS
+@F    FDATE  FMCD  FACD  FDEP  FAMN  FAMP  FAMK  FAMC  FAMO  FOCD
+  1 1995136 FE005 AP002   15.  100.    0.    0.    0.    0.   -99
+  1 1995167 FE005 AP002   15.  200.    0.    0.    0.    0.   -99
+
+*RESIDUES
+@R    RDATE  RCOD  RAMT  RESN  RESP  RESK  RINP  RDEP  RMET
+
+*CHEMICALS
+@C    CDATE CHCOD CHAMT  CHME CHDEP   CHT
+
+*TILLAGE
+@T    TDATE TIMPL  TDEP
+
+*ENVIRONMENT
+@E    ODATE  EDAY  ERAD  EMAX  EMIN ERAIN  ECO2  EDEW EWIND
+
+*HARVEST
+@H    HDATE  HSTG  HCOM HSIZE   HPC  HBPC

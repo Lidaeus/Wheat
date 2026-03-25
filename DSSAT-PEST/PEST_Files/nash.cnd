@@ -1,0 +1,145 @@
+ RECORD OF "NORMAL MATRIX" CONDITION NUMBERS: CASE c:/users/18700/desktop/dssat-pest/pest_files/nash
+
+
+ ------------------------------------------------------------------------------
+ OPTIMISATION ITERATION NO.        :    1
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     5.00    
+           MATRIX CONDITION NUMBER =   25.081    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     2.50    
+           MATRIX CONDITION NUMBER =   16.072    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     10.0    
+           MATRIX CONDITION NUMBER =   43.245    
+
+
+ ------------------------------------------------------------------------------
+ OPTIMISATION ITERATION NO.        :    2
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     10.0    
+           MATRIX CONDITION NUMBER =   11.172    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     5.00    
+           MATRIX CONDITION NUMBER =   6.3121    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     20.0    
+           MATRIX CONDITION NUMBER =   21.383    
+
+
+ ------------------------------------------------------------------------------
+ OPTIMISATION ITERATION NO.        :    3
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     10.0    
+           MATRIX CONDITION NUMBER =   69.070    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     5.00    
+           MATRIX CONDITION NUMBER =   69.802    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     20.0    
+           MATRIX CONDITION NUMBER =   71.302    
+
+
+ ------------------------------------------------------------------------------
+ OPTIMISATION ITERATION NO.        :    4
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     20.0    
+           MATRIX CONDITION NUMBER =   459.07    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     10.0    
+           MATRIX CONDITION NUMBER =   296.24    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     40.0    
+           MATRIX CONDITION NUMBER =   662.86    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     80.0    
+           MATRIX CONDITION NUMBER =   874.09    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     160.    
+           MATRIX CONDITION NUMBER =   1058.5    
+
+
+ ------------------------------------------------------------------------------
+ OPTIMISATION ITERATION NO.        :    5
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     80.0    
+           MATRIX CONDITION NUMBER =   162.34    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     40.0    
+           MATRIX CONDITION NUMBER =   92.374    
+
+
+ ------------------------------------------------------------------------------
+ OPTIMISATION ITERATION NO.        :    6
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     20.0    
+           MATRIX CONDITION NUMBER =   574.91    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     10.0    
+           MATRIX CONDITION NUMBER =   313.31    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     40.0    
+           MATRIX CONDITION NUMBER =   1097.9    
+
+
+ ------------------------------------------------------------------------------
+ OPTIMISATION ITERATION NO.        :    7
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     20.0    
+           MATRIX CONDITION NUMBER =   969.74    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     20.0    
+           MATRIX CONDITION NUMBER =   72.381    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     10.0    
+           MATRIX CONDITION NUMBER =   43.209    
+
+
+ ------------------------------------------------------------------------------
+ OPTIMISATION ITERATION NO.        :    8
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     5.00    
+           MATRIX CONDITION NUMBER =   268.74    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     5.00    
+           MATRIX CONDITION NUMBER =   296.46    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     5.00    
+           MATRIX CONDITION NUMBER =   43.788    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     2.50    
+           MATRIX CONDITION NUMBER =   34.270    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     10.0    
+           MATRIX CONDITION NUMBER =   66.882    
+
+
+ CURRENT VALUE OF MARQUARDT LAMBDA =     20.0    
+           MATRIX CONDITION NUMBER =   112.51    

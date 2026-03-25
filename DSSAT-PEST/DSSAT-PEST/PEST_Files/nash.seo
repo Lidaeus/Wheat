@@ -1,0 +1,17 @@
+ Observation           Group         Measured          Modelled        Sensitivity
+ adap1                 obsgroup       78.00000          71.00000         6.9555430E-04
+ mdap1                 obsgroup       141.0000          116.0000         4.7485720E-04
+ hwam1                 obsgroup       10960.00          12254.00         9.0282475E-03
+ hwum1                 obsgroup      0.3090000         0.3138000         1.8034343E-02
+ h#um1                 obsgroup       531.0000          488.1000         8.2138069E-04
+ cwam1                 obsgroup       23970.00          26227.00         8.2318810E-03
+ laix1                 obsgroup       6.150000          5.380000         1.8279854E-03
+ hiam1                 obsgroup      0.4600000         0.4670000         1.2142818E-02
+ adap2                 obsgroup       78.00000          71.00000         6.9555430E-04
+ mdap2                 obsgroup       141.0000          116.0000         4.7485720E-04
+ hwam2                 obsgroup       7560.000          8399.000         6.4032469E-03
+ hwum2                 obsgroup      0.2640000         0.2443000         1.3790790E-02
+ h#um2                 obsgroup       476.0000          429.8000         2.6933904E-03
+ cwam2                 obsgroup       19950.00          19486.00         3.3465733E-03
+ laix2                 obsgroup       5.060000          5.040000         2.9091539E-03
+ hiam2                 obsgroup      0.3900000         0.4310000         1.4697582E-02

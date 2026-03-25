@@ -1,0 +1,61 @@
+{
+  "crop_family": "cotton",
+  "paths": {
+    "dssat_case_dir": "C:\\DSSAT48\\Cotton",
+    "wha_path": "C:\\DSSAT48\\Cotton\\UFGA8201.COA",
+    "wht_path": "C:\\DSSAT48\\Cotton\\UFGA8201.COT",
+    "obs_a_path": "C:\\DSSAT48\\Cotton\\UFGA8201.COA",
+    "obs_t_path": "C:\\DSSAT48\\Cotton\\UFGA8201.COT",
+    "cul_path": "C:\\DSSAT48\\Genotype\\COGRO048.CUL",
+    "dssat_exe": "C:\\DSSAT48\\DSCSM048.EXE"
+  },
+  "scenario": {
+    "filex": "UFGA8201.COX",
+    "base_filex": "UFGA8201_base.COX",
+    "trts": [1, 2, 3]
+  },
+  "params": {
+    "bounds": {
+      "csdl": [23.0, 23.0, "g_cul"],
+      "ppsen": [0.01, 0.01, "g_cul"],
+      "em_fl": [29.0, 45.0, "g_cul"],
+      "fl_sh": [3.0, 11.0, "g_cul"],
+      "fl_sd": [12.0, 18.0, "g_cul"],
+      "sd_pm": [40.0, 54.0, "g_cul"],
+      "fl_lf": [75.0, 75.0, "g_cul"],
+      "lfmax": [0.95, 1.15, "g_cul"],
+      "slavr": [170.0, 250.0, "g_cul"],
+      "sizlf": [250.0, 300.0, "g_cul"],
+      "xfrt": [0.55, 0.9, "g_cul"],
+      "wtpsd": [0.18, 0.18, "g_cul"],
+      "sfdur": [20.0, 40.0, "g_cul"],
+      "sdpdv": [20.0, 27.0, "g_cul"],
+      "podur": [8.0, 12.0, "g_cul"],
+      "thrsh": [74.0, 74.0, "g_cul"],
+      "sdpro": [0.153, 0.153, "g_cul"],
+      "sdlip": [0.12, 0.12, "g_cul"]
+    },
+    "importance_exponent": {
+      "yield": 10,
+      "lai": 1,
+      "cwam": 5
+    },
+    "groups": {
+      "g_cul": {
+        "inctyp": "relative",
+        "derinc": 0.05
+      }
+    }
+  },
+  "metrics": {
+    "yield_var": "HWAM",
+    "laix_var": "LAIX"
+  },
+  "observations": {
+    "allow_missing_obs_files": true,
+    "groups": {
+      "obs_yield": {"patterns": ["hwam_"], "weight": 1.0},
+      "obs_laix": {"patterns": ["laix_"], "weight": 1.0}
+    }
+  }
+}

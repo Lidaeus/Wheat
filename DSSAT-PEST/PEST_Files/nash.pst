@@ -1,0 +1,49 @@
+pcf
+* control data
+restart  estimation
+    6    16     6     0     1
+    1     1 single point   1   0   0
+    5   2.0   0.3  0.03    10
+  3.0   3.0 0.001  0
+  0.1
+   50  0.01     3     3  0.01     3
+    1     1     1
+* parameter groups
+mp1          relative 0.01  0.0  switch  2.0 parabolic
+mp2          relative 0.01  0.0  switch  2.0 parabolic
+mp5          relative 0.01  0.0  switch  2.0 parabolic
+mg2          relative 0.01  0.0  switch  2.0 parabolic
+mg3          relative 0.01  0.0  switch  2.0 parabolic
+phi          relative 0.01  0.0  switch  2.0 parabolic
+* parameter data
+mp1          none relative  172.8                  6.00000 450.00000             mp1             1.0000        0.0000 
+mp2          none relative  1.702                  0.00010   2.00000             mp2             1.0000        0.0000 
+mp5          none relative  680.9                580.00000 999.00000             mp5             1.0000        0.0000 
+mg2          none relative  294.6                248.00000 990.00000             mg2             1.0000        0.0000 
+mg3          none relative  5.243                  5.00000  16.50000             mg3             1.0000        0.0000 
+phi          none relative  58.84                 40.00000  70.00000             phi             1.0000        0.0000 
+* observation groups
+obsgroup
+* observation data
+adap1 78.0000 0.00709219858156028 obsgroup
+mdap1 141.000 0.00709219858156028 obsgroup
+hwam1 10960.0 4.17188151856487e-05 obsgroup
+hwum1 0.309000 3.23624595469256 obsgroup
+h#um1 531.000 0.00188323917137476 obsgroup
+cwam1 23970.0 4.17188151856487e-05 obsgroup
+laix1 6.15000 0.16260162601626 obsgroup
+hiam1 0.460000 2.17391304347826 obsgroup
+adap2 78.0000 0.00709219858156028 obsgroup
+mdap2 141.000 0.00709219858156028 obsgroup
+hwam2 7560.00 4.17188151856487e-05 obsgroup
+hwum2 0.264000 3.23624595469256 obsgroup
+h#um2 476.000 0.00188323917137476 obsgroup
+cwam2 19950.0 4.17188151856487e-05 obsgroup
+laix2 5.06000 0.16260162601626 obsgroup
+hiam2 0.390000 2.17391304347826 obsgroup
+* model command line
+C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.bat
+* model input/output
+C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/MZCER046.tpl  C:/DSSAT46/Genotype/MZCER046.CUL
+C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/Evaluate.ins  C:/Users/18700/Desktop/DSSAT-PEST/DSSAT_Files/Evaluate.OUT
+* prior information

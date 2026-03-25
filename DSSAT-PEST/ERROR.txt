@@ -1,0 +1,199 @@
+
+C:\Users\18700\Desktop\DSSAT-PEST>C:
+
+C:\Users\18700\Desktop\DSSAT-PEST>cd C:/Users/18700/Desktop/DSSAT-PEST/PEST_software 
+
+C:\Users\18700\Desktop\DSSAT-PEST\PEST_software>tempchek C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/MZCER046.tpl 
+
+TEMPCHEK Version 13.5. Watermark Numerical Computing.
+
+Errors in file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/MZCER046.tpl ----->
+No errors encountered.
+
+6 parameters identified in file 
+  C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/MZCER046.tpl: these are 
+  listed in file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/MZCER046.pmt.
+
+
+C:\Users\18700\Desktop\DSSAT-PEST>C:
+
+C:\Users\18700\Desktop\DSSAT-PEST>cd C:/Users/18700/Desktop/DSSAT-PEST/PEST_software 
+
+C:\Users\18700\Desktop\DSSAT-PEST\PEST_software>inschek C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/Evaluate.ins 
+
+INSCHEK Version 13.5. Watermark Numerical Computing.
+
+Errors in file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/Evaluate.ins ----->
+No errors encountered.
+
+16 observations identified in file 
+  C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/Evaluate.ins: these are 
+  listed in file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/Evaluate.obf.
+
+
+C:\Users\18700\Desktop\DSSAT-PEST\PEST_software>inschek C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/Evaluate.ins C:/Users/18700/Desktop/DSSAT-PEST/DSSAT_Files/Evaluate.OUT 
+
+INSCHEK Version 13.5. Watermark Numerical Computing.
+
+Errors in file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/Evaluate.ins ----->
+No errors encountered.
+
+Reading model output file 
+  C:/Users/18700/Desktop/DSSAT-PEST/DSSAT_Files/Evaluate.OUT ----->
+No errors encountered.
+
+16 observations identified in file 
+  C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/Evaluate.ins: these are 
+  listed in file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/Evaluate.obf 
+  together with their values as read from file 
+  C:/Users/18700/Desktop/DSSAT-PEST/DSSAT_Files/Evaluate.OUT.
+
+
+C:\Users\18700\Desktop\DSSAT-PEST\PEST_software>inschek C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/Measure.ins 
+
+INSCHEK Version 13.5. Watermark Numerical Computing.
+
+Errors in file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/Measure.ins ----->
+No errors encountered.
+
+16 observations identified in file 
+  C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/Measure.ins: these are listed 
+  in file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/Measure.obf.
+
+
+C:\Users\18700\Desktop\DSSAT-PEST\PEST_software>inschek C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/Measure.ins C:/Users/18700/Desktop/DSSAT-PEST/DSSAT_Files/Evaluate.OUT 
+
+INSCHEK Version 13.5. Watermark Numerical Computing.
+
+Errors in file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/Measure.ins ----->
+No errors encountered.
+
+Reading model output file 
+  C:/Users/18700/Desktop/DSSAT-PEST/DSSAT_Files/Evaluate.OUT ----->
+No errors encountered.
+
+16 observations identified in file 
+  C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/Measure.ins: these are listed 
+  in file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/Measure.obf together 
+  with their values as read from file 
+  C:/Users/18700/Desktop/DSSAT-PEST/DSSAT_Files/Evaluate.OUT.
+
+
+C:\Users\18700\Desktop\DSSAT-PEST\PEST_software>pestgen C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/MZCER046.par C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/Measure.obf 
+
+PESTGEN Version 13.5. Watermark Numerical Computing.
+
+Cannot open observation value file C:/Users/18700/Des.
+
+
+C:\Users\18700\Desktop\DSSAT-PEST>C:
+
+C:\Users\18700\Desktop\DSSAT-PEST>cd C:/Users/18700/Desktop/DSSAT-PEST/PEST_software 
+
+C:\Users\18700\Desktop\DSSAT-PEST\PEST_software>pestchek C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst 
+
+PESTCHEK Version 13.5. Watermark Numerical Computing.
+
+Errors ----->
+Line 19 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 20 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 21 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 22 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 23 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 24 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+
+C:\Users\18700\Desktop\DSSAT-PEST>C:
+
+C:\Users\18700\Desktop\DSSAT-PEST>cd C:/Users/18700/Desktop/DSSAT-PEST/PEST_software 
+
+C:\Users\18700\Desktop\DSSAT-PEST\PEST_software>pestchek C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst 
+
+PESTCHEK Version 13.5. Watermark Numerical Computing.
+
+Errors ----->
+Line 19 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 20 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 21 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 22 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 23 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 24 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+
+C:\Users\18700\Desktop\DSSAT-PEST>C:
+
+C:\Users\18700\Desktop\DSSAT-PEST>cd C:/Users/18700/Desktop/DSSAT-PEST/PEST_software 
+
+C:\Users\18700\Desktop\DSSAT-PEST\PEST_software>pestchek C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst 
+
+PESTCHEK Version 13.5. Watermark Numerical Computing.
+
+Errors ----->
+Line 19 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 20 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 21 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 22 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 23 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 24 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+
+C:\Users\18700\Desktop\DSSAT-PEST>C:
+
+C:\Users\18700\Desktop\DSSAT-PEST>cd C:/Users/18700/Desktop/DSSAT-PEST/PEST_software 
+
+C:\Users\18700\Desktop\DSSAT-PEST\PEST_software>pestchek C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst 
+
+PESTCHEK Version 13.5. Watermark Numerical Computing.
+
+Errors ----->
+Line 19 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 20 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 21 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 22 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 23 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
+Line 24 of file C:/Users/18700/Desktop/DSSAT-PEST/PEST_Files/nash.pst: no 
+  value supplied for DERCOM yet a value was supplied for JACFILE in the "* 
+  control data" section of this file.
