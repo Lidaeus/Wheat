@@ -262,3 +262,40 @@ Final_Score: 0.544377
 ```
 </details>
 
+### Strategy: 8_AgMIP_Two_step_WLS
+**Score:** 0.659128
+```python
+import numpy as np
+
+def calculate_loss(sim_yield, obs_yield, sim_lai, obs_lai):
+    # Step 1: pseudo-variances
+    var_y = np.var(sim_yield - obs_yield) + 1e-8
+    var_l = np.var(sim_lai - obs_lai) + 1e-8
+    
+    # Step 2: WLS
+    loss_y = np.mean((sim_yield - obs_yield)**2) / var_y
+    loss_l = np.mean((sim_lai - obs_lai)**2) / var_l
+    
+    return loss_y + loss_l
+
+```
+<details><summary>Output</summary>
+
+```
+Starting Official DSSAT-based Optimization Evaluation...
+Current EVAL_MODE: weighted
+Optimization Success: True
+Final Parameters:
+  P1V: 12.75
+  P1D: 30.77
+  P5: 527.84
+  G1: 37.29
+  G2: 45.88
+  G3: 1.92
+  PHINT: 107.17
+Final_Loss_Value: 3.472284
+Final_Score: 0.659128
+
+```
+</details>
+
