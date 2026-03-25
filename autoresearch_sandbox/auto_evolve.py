@@ -174,7 +174,8 @@ def main():
         # Ensure EVAL_MODE is "weighted"
         with open(EVAL_PATH, "r", encoding="utf-8") as f:
             eval_code = f.read()
-        eval_code = eval_code.replace('EVAL_MODE = "pure_mgda"', 'EVAL_MODE = "weighted"')
+        import re
+        eval_code = re.sub(r'EVAL_MODE = ".*?"', 'EVAL_MODE = "weighted"', eval_code)
         with open(EVAL_PATH, "w", encoding="utf-8") as f:
             f.write(eval_code)
 
