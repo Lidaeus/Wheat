@@ -386,3 +386,40 @@ Final_Score: 0.280406
 ```
 </details>
 
+### Strategy: 2_Inverse_RMSE
+**Score:** 0.280406
+```python
+import numpy as np
+
+def calculate_loss(sim_yield, obs_yield, sim_lai, obs_lai):
+    rmse_yield_base = np.sqrt(np.mean(obs_yield**2)) + 1e-8
+    rmse_lai_base = np.sqrt(np.mean(obs_lai**2)) + 1e-8
+    
+    rmse_y = np.sqrt(np.mean((sim_yield - obs_yield)**2))
+    rmse_l = np.sqrt(np.mean((sim_lai - obs_lai)**2))
+    
+    return (rmse_y / rmse_yield_base) + (rmse_l / rmse_lai_base)
+
+```
+<details><summary>Output</summary>
+
+```
+Starting Official DSSAT-based Optimization Evaluation...
+Current EVAL_MODE: pest_glm_grouped
+Running PEST-GLM (Levenberg-Marquardt / TRF)...
+Least Squares Status: 3, Message: `xtol` termination condition is satisfied.
+Optimization Success: True
+Final Parameters:
+  P1V: 9.49
+  P1D: 3.12
+  P5: 331.40
+  G1: 12.87
+  G2: 62.22
+  G3: 2.22
+  PHINT: 86.01
+Final_Loss_Value: 0.458841
+Final_Score: 0.280406
+
+```
+</details>
+
