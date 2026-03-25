@@ -114,3 +114,41 @@ Final_Score: 1.089177
 ```
 </details>
 
+### Strategy: 4_Min_Max_Normalization
+**Score:** 0.504086
+```python
+import numpy as np
+
+def calculate_loss(sim_yield, obs_yield, sim_lai, obs_lai):
+    err_y = np.abs(sim_yield - obs_yield)
+    err_l = np.abs(sim_lai - obs_lai)
+    
+    max_err_y = np.max(obs_yield) + 1e-8
+    max_err_l = np.max(obs_lai) + 1e-8
+    
+    norm_y = np.mean(err_y / max_err_y)
+    norm_l = np.mean(err_l / max_err_l)
+    
+    return norm_y + norm_l
+
+```
+<details><summary>Output</summary>
+
+```
+Starting Official DSSAT-based Optimization Evaluation...
+Current EVAL_MODE: weighted
+Optimization Success: True
+Final Parameters:
+  P1V: 6.88
+  P1D: 44.93
+  P5: 446.49
+  G1: 32.57
+  G2: 48.33
+  G3: 1.80
+  PHINT: 121.67
+Final_Loss_Value: 0.519223
+Final_Score: 0.504086
+
+```
+</details>
+
