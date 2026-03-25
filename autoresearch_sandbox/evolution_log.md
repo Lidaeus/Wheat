@@ -580,3 +580,46 @@ Final_Score: 0.280406
 ```
 </details>
 
+### Strategy: 7_Equal_Contribution
+**Score:** 0.280406
+```python
+import numpy as np
+
+def calculate_loss(sim_yield, obs_yield, sim_lai, obs_lai):
+    loss_y = np.mean((sim_yield - obs_yield)**2)
+    loss_l = np.mean((sim_lai - obs_lai)**2)
+    
+    # Dynamically balance by multiplying each by the inverse of the other's loss to equalize gradients roughly
+    weight_y = 1.0 / (loss_y + 1e-8)
+    weight_l = 1.0 / (loss_l + 1e-8)
+    
+    # Normalize weights
+    sum_w = weight_y + weight_l
+    weight_y /= sum_w
+    weight_l /= sum_w
+    
+    return weight_y * loss_y + weight_l * loss_l
+
+```
+<details><summary>Output</summary>
+
+```
+Starting Official DSSAT-based Optimization Evaluation...
+Current EVAL_MODE: pest_glm_grouped
+Running PEST-GLM (Levenberg-Marquardt / TRF)...
+Least Squares Status: 3, Message: `xtol` termination condition is satisfied.
+Optimization Success: True
+Final Parameters:
+  P1V: 9.49
+  P1D: 3.12
+  P5: 331.40
+  G1: 12.87
+  G2: 62.22
+  G3: 2.22
+  PHINT: 86.01
+Final_Loss_Value: 0.458841
+Final_Score: 0.280406
+
+```
+</details>
+
