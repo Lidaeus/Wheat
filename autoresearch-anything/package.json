@@ -1,0 +1,26 @@
+{
+  "name": "autoresearch-anything",
+  "version": "1.0.0",
+  "description": "Set up an autonomous AI improvement loop for any project",
+  "type": "module",
+  "license": "MIT",
+  "author": "Zalmay Karimi",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zkarimi22/autoresearch-anything.git"
+  },
+  "keywords": [
+    "autoresearch",
+    "ai",
+    "autonomous",
+    "improvement-loop",
+    "eval",
+    "claude-code"
+  ],
+  "bin": {
+    "autoresearch-anything": "./init.js"
+  },
+  "scripts": {
+    "init": "node init.js"
+  }
+}
