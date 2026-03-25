@@ -299,3 +299,39 @@ Final_Score: 0.659128
 ```
 </details>
 
+### Strategy: 9_Pareto_Dominance
+**Score:** 0.547266
+```python
+import numpy as np
+
+def calculate_loss(sim_yield, obs_yield, sim_lai, obs_lai):
+    nrmse_y = np.sqrt(np.mean((sim_yield - obs_yield)**2)) / (np.mean(obs_yield) + 1e-8)
+    nrmse_l = np.sqrt(np.mean((sim_lai - obs_lai)**2)) / (np.mean(obs_lai) + 1e-8)
+    
+    # Scalarize pareto logic: distance to origin (0,0) + penalty for imbalance
+    distance = np.sqrt(nrmse_y**2 + nrmse_l**2)
+    imbalance = np.abs(nrmse_y - nrmse_l)
+    
+    return distance + 0.5 * imbalance
+
+```
+<details><summary>Output</summary>
+
+```
+Starting Official DSSAT-based Optimization Evaluation...
+Current EVAL_MODE: weighted
+Optimization Success: True
+Final Parameters:
+  P1V: 9.43
+  P1D: 2.89
+  P5: 346.38
+  G1: 14.67
+  G2: 63.35
+  G3: 2.06
+  PHINT: 86.40
+Final_Loss_Value: 0.834525
+Final_Score: 0.547266
+
+```
+</details>
+
