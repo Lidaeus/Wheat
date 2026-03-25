@@ -3050,3 +3050,71 @@ Final_Score: 999.000000
 ```
 </details>
 
+### Strategy: Grouped_PEST_GLM
+**Score:** None
+<details><summary>Output</summary>
+
+```
+Starting Official DSSAT-based Optimization Evaluation...
+Current EVAL_MODE: pest_glm_grouped
+Running PEST-GLM (Levenberg-Marquardt / TRF)...
+DSSAT Error: Traceback (most recent call last):
+  File "c:\DSSAT48\Wheat\mvp_pest_mgda\src\run_model.py", line 775, in <module>
+    main()
+    ~~~~^^
+  File "c:\DSSAT48\Wheat\mvp_pest_mgda\src\run_model.py", line 702, in main
+    _run_dssat(filex_name, int(trt), dssat_dir, cfg)
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\DSSAT48\Wheat\mvp_pest_mgda\src\run_model.py", line 77, in _run_dssat
+    raise RuntimeError(f"DSSAT failed: {cp.returncode}\nSTDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}")
+RuntimeError: DSSAT failed: 38
+STDOUT:
+
+STDERR:
+forrtl: ????????????,???????
+
+forrtl: severe (38): error during write, unit 30, file C:\DSSAT48\Wheat\LUN.LST
+Image              PC                Routine            Line        Source             
+DSCSM048.EXE       00007FF76D23051D  Unknown               Unknown  Unknown
+DSCSM048.EXE       00007FF76D2071BA  Unknown               Unknown  Unknown
+DSCSM048.EXE       00007FF76CEE9200  Unknown               Unknown  Unknown
+DSCSM048.EXE       00007FF76CB9E9E6  Unknown               Unknown  Unknown
+DSCSM048.EXE       00007FF76D29A41E  Unknown               Unknown  Unknown
+DSCSM048.EXE       00007FF76D29A800  Unknown               Unknown  Unknown
+KERNEL32.DLL       00007FF8341DE8D7  Unknown               Unknown  Unknown
+ntdll.dll          00007FF83546C48C  Unknown               Unknown  Unknown
+
+
+DSSAT Stdout: 
+DSSAT Error: Traceback (most recent call last):
+  File "c:\DSSAT48\Wheat\mvp_pest_mgda\src\run_model.py", line 775, in <module>
+    main()
+    ~~~~^^
+  File "c:\DSSAT48\Wheat\mvp_pest_mgda\src\run_model.py", line 702, in main
+    _run_dssat(filex_name, int(trt), dssat_dir, cfg)
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\DSSAT48\Wheat\mvp_pest_mgda\src\run_model.py", line 77, in _run_dssat
+    raise RuntimeError(f"DSSAT failed: {cp.returncode}\nSTDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}")
+RuntimeError: DSSAT failed: 38
+STDOUT:
+
+STDERR:
+forrtl: ????????????,???????
+
+forrtl: severe (38): error during write, unit 30, file C:\DSSAT48\Wheat\LUN.LST
+Image              PC                Routine            Line        Source             
+DSCSM048.EXE       00007FF76D23051D  Unknown               Unknown  Unknown
+DSCSM048.EXE       00007FF76D2071BA  Unknown               Unknown  Unknown
+DSCSM048.EXE       00007FF76CEE9200  Unknown               Unknown  Unknown
+DSCSM048.EXE       00007FF76CB9E9E6  Unknown               Unknown  Unknown
+DSCSM048.EXE       00007FF76D29A41E  Unknown               Unknown  Unknown
+DSCSM048.EXE       00007FF76D29A800  Unknown               Unknown  Unknown
+KERNEL32.DLL       00007FF8341DE8D7  Unknown               Unknown  Unknown
+ntdll.dll          00007FF83546C48C  Unknown               Unknown  Unknown
+
+
+DSSAT Stdout: 
+
+```
+</details>
+
