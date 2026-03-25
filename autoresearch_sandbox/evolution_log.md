@@ -152,3 +152,34 @@ Final_Score: 0.504086
 ```
 </details>
 
+### Strategy: 5_Mean_Normalization_NRMSE
+**Score:** 0.32027
+```python
+import numpy as np
+
+def calculate_loss(sim_yield, obs_yield, sim_lai, obs_lai):
+    nrmse_y = np.sqrt(np.mean((sim_yield - obs_yield)**2)) / (np.mean(obs_yield) + 1e-8)
+    nrmse_l = np.sqrt(np.mean((sim_lai - obs_lai)**2)) / (np.mean(obs_lai) + 1e-8)
+    return nrmse_y + nrmse_l
+
+```
+<details><summary>Output</summary>
+
+```
+Starting Official DSSAT-based Optimization Evaluation...
+Current EVAL_MODE: weighted
+Optimization Success: True
+Final Parameters:
+  P1V: 61.75
+  P1D: 7.49
+  P5: 515.52
+  G1: 19.44
+  G2: 64.81
+  G3: 2.01
+  PHINT: 91.96
+Final_Loss_Value: 0.643187
+Final_Score: 0.320270
+
+```
+</details>
+
