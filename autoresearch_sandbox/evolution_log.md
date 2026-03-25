@@ -183,3 +183,41 @@ Final_Score: 0.320270
 ```
 </details>
 
+### Strategy: 6_Log_transformation
+**Score:** 0.314199
+```python
+import numpy as np
+
+def calculate_loss(sim_yield, obs_yield, sim_lai, obs_lai):
+    log_sim_y = np.log(np.clip(sim_yield, 1e-8, None))
+    log_obs_y = np.log(np.clip(obs_yield, 1e-8, None))
+    
+    log_sim_l = np.log(np.clip(sim_lai, 1e-8, None))
+    log_obs_l = np.log(np.clip(obs_lai, 1e-8, None))
+    
+    loss_y = np.mean((log_sim_y - log_obs_y)**2)
+    loss_l = np.mean((log_sim_l - log_obs_l)**2)
+    
+    return loss_y + loss_l
+
+```
+<details><summary>Output</summary>
+
+```
+Starting Official DSSAT-based Optimization Evaluation...
+Current EVAL_MODE: weighted
+Optimization Success: True
+Final Parameters:
+  P1V: 44.63
+  P1D: 39.27
+  P5: 572.03
+  G1: 28.92
+  G2: 63.55
+  G3: 1.20
+  PHINT: 85.72
+Final_Loss_Value: 0.212381
+Final_Score: 0.314199
+
+```
+</details>
+
