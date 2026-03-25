@@ -1,10 +1,10 @@
 import numpy as np
 
 def calculate_loss(sim_yield, obs_yield, sim_lai, obs_lai):
-    var_yield = np.var(obs_yield) if np.var(obs_yield) > 0 else 1.0
-    var_lai = np.var(obs_lai) if np.var(obs_lai) > 0 else 1.0
+    rmse_yield_base = np.sqrt(np.mean(obs_yield**2)) + 1e-8
+    rmse_lai_base = np.sqrt(np.mean(obs_lai**2)) + 1e-8
     
-    loss_yield = np.mean((sim_yield - obs_yield)**2) / var_yield
-    loss_lai = np.mean((sim_lai - obs_lai)**2) / var_lai
+    rmse_y = np.sqrt(np.mean((sim_yield - obs_yield)**2))
+    rmse_l = np.sqrt(np.mean((sim_lai - obs_lai)**2))
     
-    return loss_yield + loss_lai
+    return (rmse_y / rmse_yield_base) + (rmse_l / rmse_lai_base)
