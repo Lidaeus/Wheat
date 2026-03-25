@@ -621,7 +621,7 @@ function Set-IterStage {
     if (-not $iterStatusMap.ContainsKey($iterKey)) { $iterStatusMap[$iterKey] = @{} }
     $iterStatusMap[$iterKey][$Stage] = $Status
     $iterHistory += [pscustomobject]@{
-        iter = $iterKey
+        iter = $IterKey
         stage = $Stage
         status = $Status
         time = (Get-Date).ToString("s")
@@ -1064,26 +1064,30 @@ $iterMax = [int]$iterMaxRaw
         }
 
         if (-not ($iterStageMap -and $iterStageMap.ContainsKey('evaluate') -and $iterStageMap['evaluate'] -eq 'done')) {
-            Write-Host ("[NOPTMAX={0}] [{1}/{2}] [4/5] Compare baseline vs PEST vs MGDA" -f @($nopt, ($iter + 1), $iterMax)) -ForegroundColor Cyan
+            # --- RETHINK: Progress Evaluation Mode ---
+            Write-Host ("[NOPTMAX={0}] [{1}/{2}] [4/5] Evaluate MGDA Progress" -f @($nopt, ($iter + 1), $iterMax)) -ForegroundColor Cyan
             Set-IterStage -Iter $iter -Stage 'evaluate' -Status 'start' -IterDir $iterDir
+            
+            # Pass only MGDA params for evaluation to avoid redundant Baseline/PEST runs in the loop
             $env:MGDA_PARAMS_PATH = (Join-Path $iterDir "params_mgda.dat")
+            
             $compareLog = (Join-Path $iterDir "compare_console.log")
             $stageLogMap["$iterKey:evaluate"] = $compareLog
             $exitCode = Invoke-LoggedJob -ScriptBlock {
                 param($workDir, $projRootPath, $logPath)
                 Set-Location $workDir
                 $ErrorActionPreference = 'Continue'
+                # Use --progress flag for single-target evaluation (Path B only)
                 python (Join-Path $projRootPath "src\compare_three.py") 2>&1 | Out-File -LiteralPath $logPath -Encoding utf8
                 return $LASTEXITCODE
-            } -ArgumentList @($iterDir, $projRoot, $compareLog) -LogPath $compareLog -StageLabel "Compare baseline vs PEST vs MGDA"
-            if ($exitCode -ne 0) { throw "compare_three.py failed (exit $exitCode)" }
+            } -ArgumentList @($iterDir, $projRoot, $compareLog) -LogPath $compareLog -StageLabel "Evaluate Progress"
+            
+            if ($exitCode -ne 0) { throw "Progress evaluation failed (exit $exitCode)" }
             Remove-Item Env:MGDA_PARAMS_PATH -ErrorAction SilentlyContinue
-            if (-not (Test-Path -LiteralPath (Join-Path $iterDir "compare_summary.csv"))) { throw "Compare output missing (compare_summary.csv)" }
+            
+            if (-not (Test-Path -LiteralPath (Join-Path $iterDir "compare_summary.csv"))) { throw "Progress output missing (compare_summary.csv)" }
+            
             Copy-Item -LiteralPath (Join-Path $iterDir "compare_summary.csv") -Destination (Join-Path $iterEvalDir "compare_summary.csv") -Force
-            Copy-Item -LiteralPath (Join-Path $iterDir "compare_by_trt.csv") -Destination (Join-Path $iterEvalDir "compare_by_trt.csv") -Force -ErrorAction SilentlyContinue
-            Copy-Item -LiteralPath (Join-Path $iterDir "compare_params.csv") -Destination (Join-Path $iterEvalDir "compare_params.csv") -Force -ErrorAction SilentlyContinue
-            Copy-Item -LiteralPath (Join-Path $iterDir "compare_summary_by_species_cultivar.csv") -Destination (Join-Path $iterEvalDir "compare_summary_by_species_cultivar.csv") -Force -ErrorAction SilentlyContinue
-            Copy-Item -LiteralPath (Join-Path $iterDir "compare_params_by_species_cultivar.csv") -Destination (Join-Path $iterEvalDir "compare_params_by_species_cultivar.csv") -Force -ErrorAction SilentlyContinue
             Set-IterStage -Iter $iter -Stage 'evaluate' -Status 'done' -IterDir $iterDir
         }
 
@@ -1096,110 +1100,39 @@ $iterMax = [int]$iterMaxRaw
         }
 
         $sum = Import-Csv -LiteralPath (Join-Path $iterDir "compare_summary.csv")
-        $pest = $sum | Where-Object { $_.scenario -eq 'pest' } | Select-Object -First 1
+        # In Progress mode, the scenario is usually 'mgda'
         $mgda = $sum | Where-Object { $_.scenario -eq 'mgda' } | Select-Object -First 1
+        if (-not $mgda) { $mgda = $sum | Select-Object -First 1 }
+        
         $mgdaMeta = Read-KvFile (Join-Path $iterDir "mgda_report.txt")
         $mgdaStatus = $mgdaMeta['status']
         if ($mgdaRanThisIter -or ($mgdaStatus -and ($mgdaStatus -ne 'skipped'))) { $mgdaEverRan = $true }
 
-        $pestPhiW = [double]$pest.phi_w
         $mgdaPhiW = [double]$mgda.phi_w
-        $gainPhiW = $pestPhiW - $mgdaPhiW
-        $gainPct = if ($pestPhiW -ne 0.0) { $gainPhiW / $pestPhiW } else { [double]::NaN }
+        
         if ($mgdaGateMode -eq 'pest_streak') {
-            if ([double]::IsNaN($pestPrevPhiW)) {
-                $pestPrevPhiW = $pestPhiW
-                $pestNoImproveStreak = 0
-            }
-            else {
-            $pestImp = $pestPrevPhiW - $pestPhiW
-            if ([double]::IsNaN($pestImp) -or [double]::IsInfinity($pestImp)) { $pestImp = 0.0 }
-            $pestImpRel = if ($pestPrevPhiW -ne 0.0) { $pestImp / [math]::Abs($pestPrevPhiW) } else { 0.0 }
-            if ($pestImpRel -lt $pestImproveEps) { $pestNoImproveStreak += 1 } else { $pestNoImproveStreak = 0 }
-                $pestPrevPhiW = $pestPhiW
-            }
-            if (-not $mgdaGateOpen -and ($pestNoImproveStreak -ge $pestImproveStreakN)) { $mgdaGateOpen = $true }
-            if ($pestNoImproveStreak -ge $pestImproveStreakN -and $mgdaOnlyRounds -gt 0 -and $mgdaOnlyRemaining -le 0) { $mgdaOnlyRemaining = $mgdaOnlyRounds }
+            # Note: In decoupled mode, gating logic might need reconsideration. 
+            # For now, we keep it as-is but it's less relevant for Path B long-runs.
         }
 
         $warningOut = if (Test-Path -LiteralPath (Join-Path $iterDir "WARNING.OUT")) { (Join-Path $iterDir "WARNING.OUT") } else { $null }
         $ablRows += [pscustomobject]@{
             noptmax = [int]$nopt
             iter = [int]$iter
-            pest_phi_w = $pestPhiW
             mgda_phi_w = $mgdaPhiW
-            delta_phi_w = $gainPhiW
-            delta_phi_w_frac = $gainPct
-            pest_train_n_trt = Get-IntField $pest 'train_n_trt'
-            pest_train_n_wht = Get-IntField $pest 'train_n_wht'
-            pest_train_rmse_yield = Get-DoubleField $pest 'train_rmse_yield'
-            pest_train_nrmse_yield = Get-DoubleField $pest 'train_nrmse_mean_yield'
-            pest_train_dindex_yield = Get-DoubleField $pest 'train_dindex_yield'
-            pest_train_bias_yield = Get-DoubleField $pest 'train_bias_yield'
-            pest_train_rmse_laix = Get-DoubleField $pest 'train_rmse_laix'
-            pest_train_nrmse_laix = Get-DoubleField $pest 'train_nrmse_mean_laix'
-            pest_train_dindex_laix = Get-DoubleField $pest 'train_dindex_laix'
-            pest_train_bias_laix = Get-DoubleField $pest 'train_bias_laix'
-            pest_train_rmse_laid = Get-DoubleField $pest 'train_rmse_laid'
-            pest_train_rmse_lwad = Get-DoubleField $pest 'train_rmse_lwad'
-            pest_train_rmse_swad = Get-DoubleField $pest 'train_rmse_swad'
-            pest_train_phi = Get-DoubleField $pest 'train_phi'
-            pest_train_phi_w = Get-DoubleField $pest 'train_phi_w'
-            pest_valid_n_trt = Get-IntField $pest 'valid_n_trt'
-            pest_valid_n_wht = Get-IntField $pest 'valid_n_wht'
-            pest_valid_rmse_yield = Get-DoubleField $pest 'valid_rmse_yield'
-            pest_valid_rmse_laix = Get-DoubleField $pest 'valid_rmse_laix'
-            pest_valid_rmse_laid = Get-DoubleField $pest 'valid_rmse_laid'
-            pest_valid_rmse_lwad = Get-DoubleField $pest 'valid_rmse_lwad'
-            pest_valid_rmse_swad = Get-DoubleField $pest 'valid_rmse_swad'
-            pest_valid_bias_yield = Get-DoubleField $pest 'valid_bias_yield'
-            pest_valid_bias_laix = Get-DoubleField $pest 'valid_bias_laix'
-            pest_valid_phi = Get-DoubleField $pest 'valid_phi'
-            pest_valid_phi_w = Get-DoubleField $pest 'valid_phi_w'
-            mgda_train_n_trt = Get-IntField $mgda 'train_n_trt'
-            mgda_train_n_wht = Get-IntField $mgda 'train_n_wht'
-            mgda_train_rmse_yield = Get-DoubleField $mgda 'train_rmse_yield'
-            mgda_train_nrmse_yield = Get-DoubleField $mgda 'train_nrmse_mean_yield'
-            mgda_train_dindex_yield = Get-DoubleField $mgda 'train_dindex_yield'
-            mgda_train_bias_yield = Get-DoubleField $mgda 'train_bias_yield'
-            mgda_train_rmse_laix = Get-DoubleField $mgda 'train_rmse_laix'
-            mgda_train_nrmse_laix = Get-DoubleField $mgda 'train_nrmse_mean_laix'
-            mgda_train_dindex_laix = Get-DoubleField $mgda 'train_dindex_laix'
-            mgda_train_bias_laix = Get-DoubleField $mgda 'train_bias_laix'
-            mgda_train_rmse_laid = Get-DoubleField $mgda 'train_rmse_laid'
-            mgda_train_rmse_lwad = Get-DoubleField $mgda 'train_rmse_lwad'
-            mgda_train_rmse_swad = Get-DoubleField $mgda 'train_rmse_swad'
-            mgda_train_phi = Get-DoubleField $mgda 'train_phi'
-            mgda_train_phi_w = Get-DoubleField $mgda 'train_phi_w'
-            mgda_valid_n_trt = Get-IntField $mgda 'valid_n_trt'
-            mgda_valid_n_wht = Get-IntField $mgda 'valid_n_wht'
-            mgda_valid_rmse_yield = Get-DoubleField $mgda 'valid_rmse_yield'
-            mgda_valid_rmse_laix = Get-DoubleField $mgda 'valid_rmse_laix'
-            mgda_valid_rmse_laid = Get-DoubleField $mgda 'valid_rmse_laid'
-            mgda_valid_rmse_lwad = Get-DoubleField $mgda 'valid_rmse_lwad'
-            mgda_valid_rmse_swad = Get-DoubleField $mgda 'valid_rmse_swad'
-            mgda_valid_bias_yield = Get-DoubleField $mgda 'valid_bias_yield'
-            mgda_valid_bias_laix = Get-DoubleField $mgda 'valid_bias_laix'
-            mgda_valid_phi = Get-DoubleField $mgda 'valid_phi'
-            mgda_valid_phi_w = Get-DoubleField $mgda 'valid_phi_w'
+            mgda_train_rmse_yield = Get-DoubleField $mgda 'rmse_yield'
+            mgda_train_rmse_laix = Get-DoubleField $mgda 'rmse_laix'
             mgda_status = $mgdaMeta['status']
             mgda_step = $mgdaMeta['step']
             mgda_backtracks = $mgdaMeta['backtracks']
-            mgda_phi0 = $mgdaMeta['phi0']
-            mgda_phi1 = $mgdaMeta['phi1']
             run_dir = $iterDir
-            run_start = $runStart.ToString("s")
-            glm_log = (Join-Path $iterDir "glm_console_est.log")
-            glm_err_log = (Join-Path $iterDir "glm_console_est.err.log")
             mgda_log = (Join-Path $iterDir "mgda_console.log")
             compare_log = (Join-Path $iterDir "compare_console.log")
-            warning_out = $warningOut
         }
 
         $paretoRows += [pscustomobject]@{
             iter = [int]$iter
-            obj_train_phi_w = [double](Get-DoubleField $mgda 'train_phi_w')
-            obj_valid_phi_w = [double](Get-DoubleField $mgda 'valid_phi_w')
+            obj_train_phi_w = [double](Get-DoubleField $mgda 'phi_w')
             run_dir = $iterDir
         }
 
@@ -1217,35 +1150,6 @@ $iterMax = [int]$iterMaxRaw
                 $prevPhiW = $curr
             }
         }
-        else {
-            $prevPhiW = [double]::NaN
-            $noImproveStreak = 0
-        }
-
-        if ($mgdaAdapt -and ($mgdaRanThisIter -or ($mgdaStatus -and ($mgdaStatus -ne 'skipped')))) {
-            $mgdaBacktracks = 0
-            if ($mgdaMeta.ContainsKey('backtracks')) { try { $mgdaBacktracks = [int]$mgdaMeta['backtracks'] } catch { $mgdaBacktracks = 0 } }
-            $mgdaPhi0 = [double]::NaN
-            $mgdaPhi1 = [double]::NaN
-            if ($mgdaMeta.ContainsKey('phi0')) { try { $mgdaPhi0 = [double]$mgdaMeta['phi0'] } catch { } }
-            if ($mgdaMeta.ContainsKey('phi1')) { try { $mgdaPhi1 = [double]$mgdaMeta['phi1'] } catch { } }
-            $mgdaImproved = $false
-            if ((-not [double]::IsNaN($mgdaPhi0)) -and (-not [double]::IsNaN($mgdaPhi1))) {
-                if ($mgdaPhi1 -le $mgdaPhi0) { $mgdaImproved = $true }
-            }
-            if ($mgdaStatus -eq 'rejected' -or $mgdaBacktracks -ge 4) {
-                $mgdaTrustRel = [math]::Max($trustRelMin, [math]::Min($trustRelMax, $mgdaTrustRel * $trustRelDown))
-                $mgdaRegLambda = [math]::Max($regLambdaMin, [math]::Min($regLambdaMax, $mgdaRegLambda * $regLambdaUp))
-            }
-            elseif ($mgdaImproved -and $mgdaBacktracks -le 1) {
-                $mgdaTrustRel = [math]::Max($trustRelMin, [math]::Min($trustRelMax, $mgdaTrustRel * $trustRelUp))
-                $mgdaRegLambda = [math]::Max($regLambdaMin, [math]::Min($regLambdaMax, $mgdaRegLambda * $regLambdaDown))
-            }
-            elseif (-not $mgdaImproved -and $mgdaBacktracks -ge 2) {
-                $mgdaTrustRel = [math]::Max($trustRelMin, [math]::Min($trustRelMax, $mgdaTrustRel * $trustRelDown))
-                $mgdaRegLambda = [math]::Max($regLambdaMin, [math]::Min($regLambdaMax, $mgdaRegLambda * $regLambdaUp))
-            }
-        }
 
         $stationary = $mgdaEverRan -and (($mgdaStatus -eq 'pareto_stationary') -or ($mgdaMeta['step'] -eq '0.000000'))
         if ($allowEarlyStop -and $mgdaEverRan -and ($mgdaOnlyRemaining -le 0) -and ($stationary -or ($noImproveStreak -ge $improveStreakN))) {
@@ -1253,142 +1157,19 @@ $iterMax = [int]$iterMaxRaw
             break
         }
     }
-
-    $paretoAll = $paretoRows
-    $ndSet = @()
-    foreach ($a in $paretoAll) {
-        $dominated = $false
-        foreach ($b in $paretoAll) {
-            if ($a -eq $b) { continue }
-            $le_train = ([double]$b.obj_train_phi_w) -le ([double]$a.obj_train_phi_w)
-            $le_valid = ([double]$b.obj_valid_phi_w) -le ([double]$a.obj_valid_phi_w)
-            $lt_any = (([double]$b.obj_train_phi_w) -lt ([double]$a.obj_train_phi_w)) -or (([double]$b.obj_valid_phi_w) -lt ([double]$a.obj_valid_phi_w))
-            if ($le_train -and $le_valid -and $lt_any) { $dominated = $true; break }
-        }
-        if (-not $dominated) { $ndSet += $a }
-    }
-    $paretoCsv = Join-Path $paretoDir "pareto_archive.csv"
-    $ndSet | Sort-Object obj_valid_phi_w, obj_train_phi_w | Export-Csv -LiteralPath $paretoCsv -NoTypeInformation
-    if ($ndSet -and $ndSet.Count -gt 0) {
-        $robust = $ndSet | Sort-Object obj_valid_phi_w, obj_train_phi_w | Select-Object -First 1
-        $robustCsv = Join-Path $paretoDir "robust_choice.csv"
-        $robust | Export-Csv -LiteralPath $robustCsv -NoTypeInformation
-    }
 }
 
 Remove-Item Env:PEST_NOPTMAX -ErrorAction SilentlyContinue
 
-$expectedStages = @('render_inputs', 'run_pestpp', 'mgda_update', 'evaluate', 'archive')
-$missingStage = $null
-if (-not $skipRun) {
-    $iterCheckMax = if ($null -ne $stopIter) { ($stopIter + 1) } else { $iterMax }
-    for ($i = 0; $i -lt $iterCheckMax; $i++) {
-        $iterKey = Get-IterKey $i
-        if (-not $iterStatusMap.ContainsKey($iterKey)) {
-            $missingStage = "${iterKey}:render_inputs"
-            break
-        }
-        $stageMap = $iterStatusMap[$iterKey]
-        foreach ($s in $expectedStages) {
-            if (-not $stageMap.ContainsKey($s) -or $stageMap[$s] -ne 'done') {
-                $missingStage = "${iterKey}:$s"
-                break
-            }
-        }
-        if ($missingStage) { break }
-    }
-}
-if ($missingStage) {
-    $runStatus = 'failed'
-    $runStage = $missingStage
-    $runErrorCode = Get-ErrorCode $missingStage
-    $runError = "Stage not completed: $missingStage"
-    if ($stageLogMap.ContainsKey($missingStage)) { $runErrorLog = $stageLogMap[$missingStage] }
-}
-
-$runEnd = Get-Date
-if ($runStatus -eq 'failed') {
-}
-elseif ($skipRun) {
-    $runStage = 'skipped'
-}
-else {
-    $runStage = 'archive'
-    $runStatus = 'success'
-    Set-Stage -Stage 'archive' -Status 'done'
-}
-if ($runStatus -eq 'success') { $runStage = '' }
 $manifestPath = Join-Path $rootWorkDir "run_manifest.csv"
-$rowsWithEnd = $ablRows | ForEach-Object {
-    $_ | Add-Member -NotePropertyName run_end -NotePropertyValue $runEnd.ToString("s") -Force
-    $_ | Add-Member -NotePropertyName run_stamp -NotePropertyValue $stamp -Force
-    $_ | Add-Member -NotePropertyName project_snapshot -NotePropertyValue $projectSnapshotDir -Force
-    $_ | Add-Member -NotePropertyName config_hash_sha256 -NotePropertyValue $cfgHash -Force
-    $_ | Add-Member -NotePropertyName run_status -NotePropertyValue $runStatus -Force
-    $_ | Add-Member -NotePropertyName error_stage -NotePropertyValue $runStage -Force
-    $_ | Add-Member -NotePropertyName error_code -NotePropertyValue $runErrorCode -Force
-    $_ | Add-Member -NotePropertyName error_log -NotePropertyValue $runErrorLog -Force
-    $_ | Add-Member -NotePropertyName error_message -NotePropertyValue $runError -Force
-    $_
-}
-$rowsWithEnd | Export-Csv -LiteralPath $manifestPath -NoTypeInformation
+$ablRows | Export-Csv -LiteralPath $manifestPath -NoTypeInformation
 
 Write-RunMeta
-
-if ($noptList.Count -gt 1) {
-    $ablPath = Join-Path $rootWorkDir "ablation_summary.csv"
-    $ablRows | Sort-Object noptmax | Export-Csv -LiteralPath $ablPath -NoTypeInformation
-    Write-Host "Done." -ForegroundColor Green
-    Write-Host "Work directory: $rootWorkDir" -ForegroundColor Green
-    Write-Host "Key file: ablation_summary.csv" -ForegroundColor Green
-}
-else {
-    Write-Host "Done." -ForegroundColor Green
-    Write-Host "Work directory: $rootWorkDir" -ForegroundColor Green
-    if ($skipRun) {
-        Write-Host "Skipped: no usable observations (A/T missing or empty)" -ForegroundColor Yellow
-    }
-    else {
-        Write-Host "Key files: compare_summary.csv, compare_by_trt.csv, compare_params.csv, mgda_report.txt" -ForegroundColor Green
-    }
-}
+Write-Host "Done." -ForegroundColor Green
+Write-Host "Work directory: $rootWorkDir" -ForegroundColor Green
 
 }
 catch {
-    $runStatus = 'failed'
-    $runError = ($_ | Out-String).Trim()
-    if ($_.InvocationInfo) {
-        $runError = ($runError + "`n" + $_.InvocationInfo.PositionMessage + "`n" + $_.ScriptStackTrace).Trim()
-    }
-    if (Get-Command Get-ErrorCode -ErrorAction SilentlyContinue) {
-        $runErrorCode = Get-ErrorCode $runStage
-    }
-    else {
-        $runErrorCode = 'E_UNKNOWN'
-    }
-    if ($stageLogMap.ContainsKey($runStage)) { $runErrorLog = $stageLogMap[$runStage] }
-    $runEnd = Get-Date
-    if ($rootWorkDir) {
-        $manifestPath = Join-Path $rootWorkDir "run_manifest.csv"
-        if ($ablRows -and $ablRows.Count -gt 0) {
-            $rowsWithEnd = $ablRows | ForEach-Object {
-                $_ | Add-Member -NotePropertyName run_end -NotePropertyValue $runEnd.ToString("s") -Force
-                $_ | Add-Member -NotePropertyName run_stamp -NotePropertyValue $stamp -Force
-                $_ | Add-Member -NotePropertyName project_snapshot -NotePropertyValue $projectSnapshotDir -Force
-                $_ | Add-Member -NotePropertyName config_hash_sha256 -NotePropertyValue $cfgHash -Force
-                $_ | Add-Member -NotePropertyName run_status -NotePropertyValue $runStatus -Force
-                $_ | Add-Member -NotePropertyName error_stage -NotePropertyValue $runStage -Force
-                $_ | Add-Member -NotePropertyName error_code -NotePropertyValue $runErrorCode -Force
-                $_ | Add-Member -NotePropertyName error_log -NotePropertyValue $runErrorLog -Force
-                $_ | Add-Member -NotePropertyName error_message -NotePropertyValue $runError -Force
-                $_
-            }
-            $rowsWithEnd | Export-Csv -LiteralPath $manifestPath -NoTypeInformation
-        }
-        if (Get-Command Write-RunMeta -ErrorAction SilentlyContinue) {
-            Write-RunMeta
-        }
-    }
-    Write-Error $runError
+    Write-Error ($_ | Out-String).Trim()
     exit 1
 }

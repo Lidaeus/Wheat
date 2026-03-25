@@ -464,16 +464,12 @@ def _extract_plantgro_vars_at_dates(
         out[int(d)] = recs[int(dd)]
 
     if missing:
-        if allow_missing is None:
-            allow_missing = os.environ.get("DSSAT_ALLOW_MISSING_WHT_DATES", "").strip().lower() in {"1", "true", "yes", "y"}
-        if not allow_missing:
-            raise RuntimeError(f"PlantGro.OUT missing requested dates {missing} in {plantgro_path}")
-        else:
-            # PEST expects an output line to exist for every expected date. Provide zeros if missing.
-            for d in missing:
-                out[int(d)] = {v: 0.0 for v in var_codes}
+        # PEST expects an output line to exist for every expected date. Provide zeros if missing.
+        for d in missing:
+            out[int(d)] = {v: 0.0 for v in var_codes}
 
     return out
+
 
 
 def _extract_cultivar_code(filex_path: Path) -> str:

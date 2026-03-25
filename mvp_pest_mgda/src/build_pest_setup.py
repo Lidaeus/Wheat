@@ -812,15 +812,21 @@ def main() -> None:
     group_variances = _calc_group_variances(meas, split_by_trt, group_defs, yield_prefix, laix_prefix)
     group_weights: dict[str, float] = {}
     
-    # 尝试加载 MGDA 的反馈 Alpha 权重
+    # 尝试加载 MGDA 的反馈 Alpha 权重 (显式开启)
     mgda_alphas: dict[str, float] = {}
+    use_mgda_alphas = os.environ.get("USE_MGDA_ALPHAS", "0").strip() == "1"
     alpha_path = cwd / "mgda_alphas.json"
-    if alpha_path.exists():
+    
+    if use_mgda_alphas and alpha_path.exists():
         try:
             mgda_alphas = json.loads(alpha_path.read_text(encoding="utf-8"))
             print(f"Applying MGDA Alpha-Feedback: {mgda_alphas}")
         except Exception as e:
             print(f"Warning: Could not read feedback alphas: {e}")
+    elif use_mgda_alphas:
+        print(f"USE_MGDA_ALPHAS=1 but {alpha_path} not found. Using uniform prior weights.")
+    else:
+        print("Using standard inverse-variance weights (Alpha-Feedback disabled).")
 
     active_alpha_groups = list(mgda_alphas.keys())
     n_alpha = len(active_alpha_groups)

@@ -77,17 +77,18 @@ def _run_one(work_dir: Path, run_model_path: Path, dssat_dir: Path, params_path:
     cp = subprocess.run([sys.executable, str(run_model_path)], cwd=str(work_dir), capture_output=True, text=True, env=env)
     out_p = work_dir / "pest_out.dat"
     return _read_kv_params(out_p) if out_p.exists() else {}
-
 def main() -> None:
     is_tournament = "--tournament" in sys.argv
+    is_progress = "--progress" in sys.argv
+
     work_dir = Path.cwd()
     project_root = Path(__file__).resolve().parents[1]
     cfg = load_project_config(project_root)
     dssat_dir = Path(cfg["paths"]["dssat_case_dir"])
     run_model_path = project_root / "src" / "run_model.py"
-    
+
     trts = [int(t) for t in cfg.get("scenario", {}).get("trts", [1,2,3,4,8,9,10,11])]
-    
+
     param_files = {}
     if is_tournament:
         param_files = {
@@ -95,12 +96,19 @@ def main() -> None:
             "pest": Path(os.environ.get("TOURNAMENT_PEST", project_root / "results" / "final_pest_params.dat")),
             "mgda": Path(os.environ.get("TOURNAMENT_MGDA", project_root / "results" / "final_mgda_params.dat"))
         }
+    elif is_progress:
+        # Progress Mode: Only evaluate the current MGDA candidate
+        mgda_p = Path(os.environ.get("MGDA_PARAMS_PATH", work_dir / "params_mgda.dat"))
+        param_files = {"mgda": mgda_p}
+        print(f">>> Progress Mode: Evaluating {mgda_p.name} only <<<")
     else:
+        # Legacy/Standard Iteration Mode
         param_files = {
             "baseline": work_dir / "params_baseline.dat",
             "pest": work_dir / "ksas_mvp_est.par",
             "mgda": work_dir / "params_mgda.dat"
         }
+
 
     sim_results = {}
     for scen, pfile in param_files.items():
