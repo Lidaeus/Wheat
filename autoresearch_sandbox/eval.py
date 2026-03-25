@@ -16,7 +16,7 @@ PARAMS_PATH = SANDBOX_DIR / "params.dat"
 PEST_OUT_PATH = SANDBOX_DIR / "pest_out.dat"
 
 # Mode switch: "weighted" (uses strategy.py), "pure_mgda", "default_dssat", "pest_glm_native", "pest_glm_grouped"
-EVAL_MODE = "pure_mgda" 
+EVAL_MODE = "default_dssat" 
 
 # True Observation Data from SWSW7501.WHA (Treatments 1, 2, 8, 9, 13, 14)
 # -99.0 indicates missing observation

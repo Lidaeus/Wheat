@@ -357,3 +357,26 @@ Final_Score: 0.319164
 ```
 </details>
 
+### Strategy: DSSAT_Default_Params
+**Score:** 0.587981
+<details><summary>Output</summary>
+
+```
+Starting Official DSSAT-based Optimization Evaluation...
+Current EVAL_MODE: default_dssat
+Running DSSAT Official Default Parameters...
+Optimization Success: True
+Final Parameters:
+  P1V: 9.33
+  P1D: 3.12
+  P5: 331.40
+  G1: 12.87
+  G2: 62.22
+  G3: 2.21
+  PHINT: 86.00
+Final_Loss_Value: 1.104841
+Final_Score: 0.587981
+
+```
+</details>
+
