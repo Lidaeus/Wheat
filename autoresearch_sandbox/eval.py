@@ -16,7 +16,7 @@ PARAMS_PATH = SANDBOX_DIR / "params.dat"
 PEST_OUT_PATH = SANDBOX_DIR / "pest_out.dat"
 
 # Mode switch: "weighted" (uses strategy.py), "pure_mgda", "default_dssat", "pest_glm_native", "pest_glm_grouped"
-EVAL_MODE = "pest_glm_grouped" 
+EVAL_MODE = "weighted" 
 
 # True Observation Data from SWSW7501.WHA (Treatments 1, 2, 8, 9, 13, 14)
 # -99.0 indicates missing observation
@@ -202,7 +202,7 @@ def main():
         lb = [b[0] for b in BOUNDS]
         ub = [b[1] for b in BOUNDS]
         # PEST generally requires many evaluations
-        res = least_squares(residuals, x0=INITIAL_GUESS, bounds=(lb, ub), method='trf', max_nfev=200, diff_step=0.1)
+        res = least_squares(residuals, x0=INITIAL_GUESS, bounds=(lb, ub), method='trf', max_nfev=100, diff_step=0.1)
         print(f"Least Squares Status: {res.status}, Message: {res.message}")
         best_params = res.x
         res_fun = res.cost
@@ -215,10 +215,10 @@ def main():
             objective_function, 
             bounds=BOUNDS,
             x0=INITIAL_GUESS,
-            maxiter=15,  # Global search iterations
+            maxiter=5,  # Global search iterations (reduced for faster run)
             minimizer_kwargs={
                 "method": "Nelder-Mead", # Local search method
-                "options": {"maxiter": 20, "maxfev": 30}
+                "options": {"maxiter": 15, "maxfev": 20}
             }
         )
         best_params = res.x
