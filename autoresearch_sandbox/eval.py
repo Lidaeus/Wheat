@@ -15,34 +15,28 @@ RUN_MODEL_PATH = Path(r"c:\DSSAT48\Wheat\mvp_pest_mgda\src\run_model.py")
 PARAMS_PATH = SANDBOX_DIR / "params.dat"
 PEST_OUT_PATH = SANDBOX_DIR / "pest_out.dat"
 
-# Mode switch: "weighted" (uses strategy.py) or "pure_mgda" (multi-objective baseline)
-EVAL_MODE = "weighted" 
+# Mode switch: "weighted" (uses strategy.py), "pure_mgda", "default_dssat", "pest_glm_native", "pest_glm_grouped"
+EVAL_MODE = "pest_glm_grouped" 
 
 # True Observation Data from SWSW7501.WHA (Treatments 1, 2, 8, 9, 13, 14)
 # -99.0 indicates missing observation
 OBS_YIELD = np.array([1617.0, 1578.0, 2754.0, 3792.0, 5425.0, 4883.0])
 OBS_LAI = np.array([1.22, 1.61, -99.0, 1.44, 3.23, 3.23])
 
-# Importance exponents (from agricultural experts)
-IMPORTANCE_EXPONENT = {
-    "yield": 10.0,
-    "lai": 1.0
-}
-
 # Parameter names and initial baseline values
-# We adopt the parameter bounds exactly from the R version (DSSAT-PEST/ParameterOutput.csv)
 PARAM_NAMES = ["p1v", "p1d", "p5", "g1", "g2", "g3", "phint"]
-INITIAL_GUESS = [30.0, 50.0, 700.0, 15.0, 45.0, 1.2, 120.0]
+# INITIAL_GUESS from DSSAT official defaults for IB1500 (Manitou)
+INITIAL_GUESS = [9.33, 3.12, 331.4, 12.87, 62.22, 2.215, 86.00]
 
-# Bounds exactly from R version (Wheat)
+# Bounds expanded slightly to accommodate the DSSAT defaults and R version bounds
 BOUNDS = [
-    (5.0, 60.0),     # p1v
+    (5.0, 65.0),     # p1v
     (0.0, 95.0),     # p1d
-    (550.0, 999.0),  # p5
-    (5.0, 30.0),     # g1
-    (30.0, 60.0),    # g2
-    (0.5, 2.1),      # g3
-    (95.0, 167.0)    # phint
+    (300.0, 999.0),  # p5
+    (5.0, 45.0),     # g1
+    (30.0, 65.0),    # g2
+    (0.5, 2.5),      # g3
+    (80.0, 167.0)    # phint
 ]
 
 # =====================================================================
@@ -173,23 +167,64 @@ def calculate_true_nrmse(sim_yield, sim_lai):
 
 def main():
     print("Starting Official DSSAT-based Optimization Evaluation...")
+    print(f"Current EVAL_MODE: {EVAL_MODE}")
     
-    # Run the optimizer (Simulating PEST/MGDA)
-    # We use dual_annealing (Simulated Annealing) as a global optimization strategy 
-    # to avoid local optima (equivalent to but more robust than R's SIEVE step).
-    # We set maxiter low for the sandbox to keep runtimes manageable for the AI loop.
-    res = dual_annealing(
-        objective_function, 
-        bounds=BOUNDS,
-        x0=INITIAL_GUESS,
-        maxiter=3,  # Global search iterations
-        minimizer_kwargs={
-            "method": "Nelder-Mead", # Local search method
-            "options": {"maxiter": 10, "maxfev": 15}
-        }
-    )
+    if EVAL_MODE == "default_dssat":
+        best_params = INITIAL_GUESS
+        print("Running DSSAT Official Default Parameters...")
+        res_fun = objective_function(best_params)
+        res_success = True
+    elif EVAL_MODE in ["pest_glm_native", "pest_glm_grouped"]:
+        from scipy.optimize import least_squares
+        
+        def residuals(params_array):
+            sim_yield, sim_lai = run_dssat_and_get_simulated(params_array)
+            if sim_yield is None or sim_lai is None:
+                return np.full(len(OBS_YIELD) + len(OBS_LAI), 1e9)
+                
+            mask_y = OBS_YIELD != -99.0
+            mask_l = OBS_LAI != -99.0
+            
+            valid_obs_y, valid_sim_y = OBS_YIELD[mask_y], sim_yield[mask_y]
+            valid_obs_l, valid_sim_l = OBS_LAI[mask_l], sim_lai[mask_l]
+            
+            res_y = valid_sim_y - valid_obs_y
+            res_l = valid_sim_l - valid_obs_l
+            
+            if EVAL_MODE == "pest_glm_grouped":
+                # Apply scaling to group them roughly equally (Inverse Mean normalization)
+                res_y = res_y / (np.mean(valid_obs_y) + 1e-8)
+                res_l = res_l / (np.mean(valid_obs_l) + 1e-8)
+                
+            return np.concatenate((res_y, res_l))
+            
+        print("Running PEST-GLM (Levenberg-Marquardt / TRF)...")
+        lb = [b[0] for b in BOUNDS]
+        ub = [b[1] for b in BOUNDS]
+        # PEST generally requires many evaluations
+        res = least_squares(residuals, x0=INITIAL_GUESS, bounds=(lb, ub), method='trf', max_nfev=200, diff_step=0.1)
+        print(f"Least Squares Status: {res.status}, Message: {res.message}")
+        best_params = res.x
+        res_fun = res.cost
+        res_success = res.success
+    else:
+        # Run the optimizer (Simulating PEST/MGDA)
+        # We use dual_annealing (Simulated Annealing) as a global optimization strategy 
+        # Increased maxiter to 15 (from 3) and maxfev to 30 to give strategies a fair chance
+        res = dual_annealing(
+            objective_function, 
+            bounds=BOUNDS,
+            x0=INITIAL_GUESS,
+            maxiter=15,  # Global search iterations
+            minimizer_kwargs={
+                "method": "Nelder-Mead", # Local search method
+                "options": {"maxiter": 20, "maxfev": 30}
+            }
+        )
+        best_params = res.x
+        res_fun = res.fun
+        res_success = res.success
     
-    best_params = res.x
     final_sim_yield, final_sim_lai = run_dssat_and_get_simulated(best_params)
     
     if final_sim_yield is None:
@@ -198,11 +233,11 @@ def main():
     else:
         final_score = calculate_true_nrmse(final_sim_yield, final_sim_lai)
     
-    print(f"Optimization Success: {res.success}")
+    print(f"Optimization Success: {res_success}")
     print("Final Parameters:")
     for name, val in zip(PARAM_NAMES, best_params):
         print(f"  {name.upper()}: {val:.2f}")
-    print(f"Final_Loss_Value: {res.fun:.6f}")
+    print(f"Final_Loss_Value: {res_fun:.6f}")
     
     # This is the line that Autoresearch will track
     print(f"Final_Score: {final_score:.6f}")

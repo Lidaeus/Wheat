@@ -191,27 +191,40 @@ def main():
         run_git_command("git add .")
         run_git_command(f'git commit -m "Autoresearch: Evaluate Strategy {name}"')
 
-    # 2. Run Pure MGDA
-    print("Running Pure MGDA...")
-    with open(EVAL_PATH, "r", encoding="utf-8") as f:
-        eval_code = f.read()
-    eval_code_mgda = eval_code.replace('EVAL_MODE = "weighted"', 'EVAL_MODE = "pure_mgda"')
-    with open(EVAL_PATH, "w", encoding="utf-8") as f:
-        f.write(eval_code_mgda)
+    # 2. Run Other Baselines and PEST-GLM strategies
+    additional_modes = {
+        "Pure_MGDA_Baseline": "pure_mgda",
+        "DSSAT_Default_Params": "default_dssat",
+        "Native_PEST_GLM": "pest_glm_native",
+        "Grouped_PEST_GLM": "pest_glm_grouped"
+    }
+
+    for mode_name, mode_val in additional_modes.items():
+        print(f"Running {mode_name}...")
+        with open(EVAL_PATH, "r", encoding="utf-8") as f:
+            eval_code = f.read()
+            
+        # Regex or simple replace for EVAL_MODE
+        # Since it might have been left as "weighted" from the loop
+        import re
+        eval_code_mod = re.sub(r'EVAL_MODE = ".*?"', f'EVAL_MODE = "{mode_val}"', eval_code)
         
-    out, score = run_eval()
-    
-    write_log(f"### Strategy: Pure_MGDA_Baseline")
-    write_log(f"**Score:** {score}")
-    write_log(f"<details><summary>Output</summary>\n\n```\n{out}\n```\n</details>\n")
-    
+        with open(EVAL_PATH, "w", encoding="utf-8") as f:
+            f.write(eval_code_mod)
+            
+        out, score = run_eval()
+        
+        write_log(f"### Strategy: {mode_name}")
+        write_log(f"**Score:** {score}")
+        write_log(f"<details><summary>Output</summary>\n\n```\n{out}\n```\n</details>\n")
+        
+        # Git commit
+        run_git_command("git add .")
+        run_git_command(f'git commit -m "Autoresearch: Evaluate {mode_name}"')
+
     # Restore EVAL_PATH
     with open(EVAL_PATH, "w", encoding="utf-8") as f:
         f.write(eval_code)
-        
-    # Git commit
-    run_git_command("git add .")
-    run_git_command('git commit -m "Autoresearch: Evaluate Pure MGDA Baseline"')
     
     print("Evolution complete. Log written to evolution_log.md")
 

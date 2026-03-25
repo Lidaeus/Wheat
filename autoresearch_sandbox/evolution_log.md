@@ -347,3 +347,42 @@ Final_Score: 0.316909
 ```
 </details>
 
+## Session Started at 2026-03-25 06:11:21
+
+### Strategy: 1_Inverse_Variance
+**Score:** 0.280406
+```python
+import numpy as np
+
+def calculate_loss(sim_yield, obs_yield, sim_lai, obs_lai):
+    var_yield = np.var(obs_yield) if np.var(obs_yield) > 0 else 1.0
+    var_lai = np.var(obs_lai) if np.var(obs_lai) > 0 else 1.0
+    
+    loss_yield = np.mean((sim_yield - obs_yield)**2) / var_yield
+    loss_lai = np.mean((sim_lai - obs_lai)**2) / var_lai
+    
+    return loss_yield + loss_lai
+
+```
+<details><summary>Output</summary>
+
+```
+Starting Official DSSAT-based Optimization Evaluation...
+Current EVAL_MODE: pest_glm_grouped
+Running PEST-GLM (Levenberg-Marquardt / TRF)...
+Least Squares Status: 3, Message: `xtol` termination condition is satisfied.
+Optimization Success: True
+Final Parameters:
+  P1V: 9.49
+  P1D: 3.12
+  P5: 331.40
+  G1: 12.87
+  G2: 62.22
+  G3: 2.22
+  PHINT: 86.01
+Final_Loss_Value: 0.458841
+Final_Score: 0.280406
+
+```
+</details>
+
