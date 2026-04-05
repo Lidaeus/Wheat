@@ -1951,7 +1951,18 @@ def main():
             grouping=GROUPING_MODE,
             status="success" if res_success else "failed"
         )
+        yield_tr_nrmse, yield_tr_bias = 999.0, 999.0
+        yield_val_nrmse, yield_val_bias = 999.0, 999.0
         
+        if result_schema_view is not None:
+            yd_vars = {"hwam", "gwad", "cwam", "yield"}
+            for r in result_schema_view.aggregate_metrics:
+                if r.metric in yd_vars:
+                    if r.split == "train":
+                        yield_tr_nrmse, yield_tr_bias = r.nrmse, r.bias
+                    elif r.split == "valid":
+                        yield_val_nrmse, yield_val_bias = r.nrmse, r.bias
+                        
         summary_path = SANDBOX_DIR / "phase1_experiment_summary.tsv"
         if summary_path.exists():
             with open(summary_path, "a", newline="", encoding="utf-8") as f:
@@ -1960,7 +1971,7 @@ def main():
                     run_id, combo_key, time.strftime("%Y-%m-%dT%H:%M:%S"), plan, WEIGHT_MODE, optimizer_mode, BUDGET_MODE,
                     CALIBRATION_SEQUENCE, GROUPING_MODE, "success" if res_success else "failed", final_score, 0, 0, 0,
                     "True" if final_score < 999.0 else "False", train_score, valid_score, all_score,
-                    0, 0, 0, 0,
+                    yield_tr_nrmse, yield_tr_bias, yield_val_nrmse, yield_val_bias,
                     time.time() - OPTIMIZATION_STARTED_AT, str(bool(VALID_TRTS)), str(TRAIN_TRTS), str(VALID_TRTS), str(CASE_DIR)
                 ])
                 

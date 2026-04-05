@@ -92,7 +92,48 @@ def main():
 
     eval_script = SANDBOX_DIR / "eval.py"
 
+    # RUN BASELINES (B0, B1, B2)
+    print("--- Running Baselines ---")
+    for crop_name, config_path in crop_configs.items():
+        if not config_path.exists():
+            continue
+            
+        baselines = [
+            ("B0", "w0_raw_identity", "default_dssat", "s1_naive_joint", "g1_flat_all_in_one"),
+            ("B1", "w0_raw_identity", "o1_least_squares", "s1_naive_joint", "g1_flat_all_in_one"), # Example B1 mapping
+            ("B2", "w0_raw_identity", "o6_pestpp_glm", "s1_naive_joint", "g1_flat_all_in_one")    # Example B2 mapping
+        ]
+        for b_name, w, o, s, g in baselines:
+            run_id = f"{b_name}_{crop_name}_0_{uuid.uuid4().hex[:6]}"
+            combo_key = f"{b_name}"
+            print(f"Running Baseline: {combo_key} for {crop_name}")
+            
+            env = os.environ.copy()
+            env["AR_WEIGHTING"] = w
+            env["AR_ENGINE"] = o
+            env["AR_SEQUENCE"] = s
+            env["AR_GROUPING"] = g
+            env["AR_PROJECT_CONFIG"] = str(config_path)
+            env["AR_RANDOM_SEED"] = "42"
+            env["AR_PHASE1_EXPORT"] = "1"
+            env["AR_RUN_ID"] = run_id
+            env["AR_COMBO_KEY"] = combo_key
+            env["AR_PLAN"] = "Baselines"
+
+            cmd = [sys.executable, str(eval_script)]
+            res = subprocess.run(cmd, env=env, capture_output=True, text=True)
+            if res.returncode != 0:
+                print(f"Baseline {b_name} failed. Return code: {res.returncode}")
+                print("Stderr:", res.stderr[-500:])
+
     run_batch("BatchA", BATCH_A, crop_configs, eval_script, 1, summary_path)
+    
+    print("--- Running Post-Processing to Derive Phase1 Metrics ---")
+    try:
+        import phase1_postprocess
+        phase1_postprocess.main()
+    except Exception as e:
+        print(f"Error during post-processing: {e}")
 
 def run_batch(batch_name, batch_combinations, crop_configs, eval_script, repetitions, summary_path):
     print(f"--- Running {batch_name} ---")
