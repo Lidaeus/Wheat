@@ -37,9 +37,23 @@ BATCH_B = [
 
 BATCH_C = [
     # W8/W4 x G3 x S2 x O1/O2
-    ("W8", "G3", "S2", "O1"), ("W8", "G3", "S2", "O2"),
-    ("W4", "G3", "S2", "O1"), ("W4", "G3", "S2", "O2"),
+    ("W8", "O1", "S2", "G3"), ("W8", "O2", "S2", "G3"),
+    ("W4", "O1", "S2", "G3"), ("W4", "O2", "S2", "G3"),
 ]
+
+BATCH_D = []
+for w in ["W0", "W4", "W6", "W8"]:
+    for o in ["O1", "O2"]:
+        for s in ["S1", "S2"]:
+            for g in ["G1", "G3"]:
+                BATCH_D.append((w, o, s, g))
+
+BATCH_MAP = {
+    "BatchA": BATCH_A,
+    "BatchB": BATCH_B,
+    "BatchC": BATCH_C,
+    "BatchD": BATCH_D,
+}
 
 def init_tsv(path, columns):
     if not path.exists():
@@ -48,7 +62,16 @@ def init_tsv(path, columns):
             writer.writerow(columns)
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--batch", type=str, choices=["Baselines", "BatchA", "BatchB", "BatchC", "BatchD", "All"], default="All", help="Which batch to run")
+    parser.add_argument("--repetitions", type=int, default=5, help="Number of repetitions per combination")
+    parser.add_argument("--skip-postprocess", action="store_true", help="Skip postprocessing derived metrics")
+    args = parser.parse_args()
+
     print("Starting Phase 1 Execution Roadmap...")
+    print(f"Target: {args.batch}, Repetitions: {args.repetitions}")
+    
     # Setup TSV outputs
     summary_path = SANDBOX_DIR / "phase1_experiment_summary.tsv"
     init_tsv(summary_path, [
@@ -85,55 +108,71 @@ def main():
         "panel_count", "panel_nrmse", "panel_bias"
     ])
 
-    # For testing, we are using just Wheat project config, run only Batch A to verify pipeline works
+    # Crop Configs
     crop_configs = {
-        "Wheat": SANDBOX_DIR / "project_wheat.json"
+        "Wheat": SANDBOX_DIR / "project_wheat.json",
+        "Maize": SANDBOX_DIR / "project_maize.json",
+        "Soybean": SANDBOX_DIR / "project_soybean.json",
+        "Rice": SANDBOX_DIR / "project_rice.json",
+        "Cotton": SANDBOX_DIR / "project_cotton.json"
     }
 
     eval_script = SANDBOX_DIR / "eval.py"
 
-    # RUN BASELINES (B0, B1, B2)
-    print("--- Running Baselines ---")
-    for crop_name, config_path in crop_configs.items():
-        if not config_path.exists():
-            continue
-            
-        baselines = [
-            ("B0", "w0_raw_identity", "default_dssat", "s1_naive_joint", "g1_flat_all_in_one"),
-            ("B1", "w0_raw_identity", "o1_least_squares", "s1_naive_joint", "g1_flat_all_in_one"), # Example B1 mapping
-            ("B2", "w0_raw_identity", "o6_pestpp_glm", "s1_naive_joint", "g1_flat_all_in_one")    # Example B2 mapping
-        ]
-        for b_name, w, o, s, g in baselines:
-            run_id = f"{b_name}_{crop_name}_0_{uuid.uuid4().hex[:6]}"
-            combo_key = f"{b_name}"
-            print(f"Running Baseline: {combo_key} for {crop_name}")
-            
-            env = os.environ.copy()
-            env["AR_WEIGHTING"] = w
-            env["AR_ENGINE"] = o
-            env["AR_SEQUENCE"] = s
-            env["AR_GROUPING"] = g
-            env["AR_PROJECT_CONFIG"] = str(config_path)
-            env["AR_RANDOM_SEED"] = "42"
-            env["AR_PHASE1_EXPORT"] = "1"
-            env["AR_RUN_ID"] = run_id
-            env["AR_COMBO_KEY"] = combo_key
-            env["AR_PLAN"] = "Baselines"
+    # RUN BASELINES
+    if args.batch in ["Baselines", "All"]:
+        print("--- Running Baselines (B0, B1, B2) ---")
+        for crop_name, config_path in crop_configs.items():
+            if not config_path.exists():
+                print(f"Skipping baselines for {crop_name}, config not found.")
+                continue
+                
+            baselines = [
+                ("B0", "w0_raw_identity", "default_dssat", "s1_naive_joint", "g1_flat_all_in_one"),
+                ("B1", "w0_raw_identity", "o1_least_squares", "s1_naive_joint", "g1_flat_all_in_one"),
+                ("B2", "w0_raw_identity", "o6_pestpp_glm", "s1_naive_joint", "g1_flat_all_in_one")
+            ]
+            for b_name, w, o, s, g in baselines:
+                run_id = f"{b_name}_{crop_name}_0_{uuid.uuid4().hex[:6]}"
+                combo_key = f"{b_name}"
+                print(f"Running Baseline: {combo_key} for {crop_name}")
+                
+                env = os.environ.copy()
+                env["AR_WEIGHTING"] = w
+                env["AR_ENGINE"] = o
+                env["AR_SEQUENCE"] = s
+                env["AR_GROUPING"] = g
+                env["AR_PROJECT_CONFIG"] = str(config_path)
+                env["AR_RANDOM_SEED"] = "42"
+                env["AR_PHASE1_EXPORT"] = "1"
+                env["AR_RUN_ID"] = run_id
+                env["AR_COMBO_KEY"] = combo_key
+                env["AR_PLAN"] = "Baselines"
 
-            cmd = [sys.executable, str(eval_script)]
-            res = subprocess.run(cmd, env=env, capture_output=True, text=True)
-            if res.returncode != 0:
-                print(f"Baseline {b_name} failed. Return code: {res.returncode}")
-                print("Stderr:", res.stderr[-500:])
+                cmd = [sys.executable, str(eval_script)]
+                res = subprocess.run(cmd, env=env, capture_output=True, text=True)
+                if res.returncode != 0:
+                    print(f"Baseline {b_name} failed. Return code: {res.returncode}")
+                    print("Stderr:", res.stderr[-500:])
 
-    run_batch("BatchA", BATCH_A, crop_configs, eval_script, 1, summary_path)
+    # RUN SPECIFIC BATCH
+    if args.batch in BATCH_MAP:
+        batches_to_run = [args.batch]
+    elif args.batch == "All":
+        batches_to_run = list(BATCH_MAP.keys())
+    else:
+        batches_to_run = []
+
+    for batch_name in batches_to_run:
+        run_batch(batch_name, BATCH_MAP[batch_name], crop_configs, eval_script, args.repetitions, summary_path)
     
-    print("--- Running Post-Processing to Derive Phase1 Metrics ---")
-    try:
-        import phase1_postprocess
-        phase1_postprocess.main()
-    except Exception as e:
-        print(f"Error during post-processing: {e}")
+    if not args.skip_postprocess:
+        print("--- Running Post-Processing to Derive Phase1 Metrics ---")
+        try:
+            import phase1_postprocess
+            phase1_postprocess.main()
+        except Exception as e:
+            print(f"Error during post-processing: {e}")
 
 def run_batch(batch_name, batch_combinations, crop_configs, eval_script, repetitions, summary_path):
     print(f"--- Running {batch_name} ---")
