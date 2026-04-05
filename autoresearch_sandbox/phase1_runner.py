@@ -77,6 +77,14 @@ def main():
         "is_at_lower_bound", "is_at_upper_bound", "normalized_distance_to_b0"
     ])
 
+    fig_path = SANDBOX_DIR / "phase1_figure_ready.tsv"
+    init_tsv(fig_path, [
+        "run_id", "score_rank", "combo_key", "plan", "weight", "engine", "budget", "sequence", "grouping", 
+        "status", "score", "metric", "split", "trt", "panel_key", "series_key", "point_key", 
+        "x_observed", "y_simulated", "residual", "abs_residual", "relative_error", 
+        "panel_count", "panel_nrmse", "panel_bias"
+    ])
+
     # For testing, we are using just Wheat project config, run only Batch A to verify pipeline works
     crop_configs = {
         "Wheat": SANDBOX_DIR / "project_wheat.json"
@@ -108,6 +116,11 @@ def run_batch(batch_name, batch_combinations, crop_configs, eval_script, repetit
                 env["AR_PROJECT_CONFIG"] = str(config_path)
                 env["AR_RANDOM_SEED"] = str(42 + rep)
 
+                env["AR_PHASE1_EXPORT"] = "1"
+                env["AR_RUN_ID"] = run_id
+                env["AR_COMBO_KEY"] = combo_key
+                env["AR_PLAN"] = batch_name
+
                 start_time = time.time()
                 
                 # Execute eval.py
@@ -124,19 +137,6 @@ def run_batch(batch_name, batch_combinations, crop_configs, eval_script, repetit
                     print(f"Run failed for {run_id}. Return code: {res.returncode}")
                     print("Stdout:", res.stdout[-500:])
                     print("Stderr:", res.stderr[-500:])
-
-                # Example of minimal logging to the summary, further metric extraction from eval.py results
-                # would be required based on how eval.py dumps its results into runs/.
-                with open(summary_path, "a", newline="", encoding="utf-8") as f:
-                    writer = csv.writer(f, delimiter="\t")
-                    # DUMMY placeholders for parsing results if run was successful
-                    writer.writerow([
-                        run_id, combo_key, datetime.now().isoformat(), batch_name, w, o, "standard",
-                        s, g, status, 0, 0, 0, 0,
-                        "False", 0, 0, 0,
-                        0, 0, 0, 0,
-                        duration, "False", "", "", ""
-                    ])
 
 if __name__ == "__main__":
     main()

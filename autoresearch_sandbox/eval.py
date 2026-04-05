@@ -1842,37 +1842,43 @@ def main():
     config_error = validate_experiment_configuration()
     if config_error:
         print_configuration_failure(config_error)
-        return
-
-    if optimizer_mode == "default_dssat":
+        res_success = False
+        res_fun = 999.0
         best_params = default_baseline_params()
-        base_metrics = comparable_evaluation_metrics()
-        base_weights = build_stage_metric_weights(
-            base_metrics,
-            split_name="train",
-            weight_mode=WEIGHT_MODE,
-            grouping_mode=GROUPING_MODE,
-            reference_sim_metrics=run_dssat_and_get_simulated(clip_params(best_params)),
-        )
-        res_fun = objective_function(
-            best_params,
-            metrics=base_metrics,
-            split_name="train",
-            metric_weights=base_weights,
-            normalize=normalize_residuals_for_weight_mode(),
-        )
-        res_success = True
-    else:
-        if optimizer_mode == "o1_least_squares":
-            best_params, res_fun, res_success = run_least_squares_optimization()
-        elif optimizer_mode == "o2_pestpp_ies":
-            best_params, res_fun, res_success = run_pestpp_ies_optimization()
-        elif optimizer_mode == "o6_pestpp_glm":
-            best_params, res_fun, res_success = run_pestpp_glm_optimization()
+        final_sim_metrics = None
+        
+    if not config_error:
+        if optimizer_mode == "default_dssat":
+            best_params = default_baseline_params()
+            base_metrics = comparable_evaluation_metrics()
+            base_weights = build_stage_metric_weights(
+                base_metrics,
+                split_name="train",
+                weight_mode=WEIGHT_MODE,
+                grouping_mode=GROUPING_MODE,
+                reference_sim_metrics=run_dssat_and_get_simulated(clip_params(best_params)),
+            )
+            res_fun = objective_function(
+                best_params,
+                metrics=base_metrics,
+                split_name="train",
+                metric_weights=base_weights,
+                normalize=normalize_residuals_for_weight_mode(),
+            )
+            res_success = True
         else:
-            best_params, res_fun, res_success = run_scalar_optimization(optimizer_mode)
+            if optimizer_mode == "o1_least_squares":
+                best_params, res_fun, res_success = run_least_squares_optimization()
+            elif optimizer_mode == "o2_pestpp_ies":
+                best_params, res_fun, res_success = run_pestpp_ies_optimization()
+            elif optimizer_mode == "o6_pestpp_glm":
+                best_params, res_fun, res_success = run_pestpp_glm_optimization()
+            else:
+                best_params, res_fun, res_success = run_scalar_optimization(optimizer_mode)
 
-    final_sim_metrics = run_dssat_and_get_simulated(best_params)
+    if not config_error:
+        final_sim_metrics = run_dssat_and_get_simulated(best_params)
+        
     if final_sim_metrics is None:
         print("Final Evaluation Failed.")
         train_score = 999.0
@@ -1915,7 +1921,102 @@ def main():
                 print(line)
     print(f"Final_Score: {final_score:.6f}")
 
+    if os.environ.get("AR_PHASE1_EXPORT") == "1":
+        run_id = os.environ.get("AR_RUN_ID", "local")
+        combo_key = os.environ.get("AR_COMBO_KEY", "combo")
+        plan = os.environ.get("AR_PLAN", "plan")
+        
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from mvp_pest_mgda.src.calibration_core.result_schema import (
+            build_experiment_export_context,
+            build_aggregate_metric_export_rows,
+            build_aggregate_metric_export_value_map,
+            build_treatment_comparison_records,
+            build_treatment_metric_export_rows,
+            build_treatment_metric_export_value_map,
+            AGGREGATE_METRIC_EXPORT_FIELDNAMES,
+            TREATMENT_METRIC_EXPORT_FIELDNAMES
+        )
+        import csv
+        
+        context = build_experiment_export_context(
+            run_id=run_id,
+            plan=plan,
+            weight_name=WEIGHT_MODE,
+            engine=optimizer_mode,
+            budget=BUDGET_MODE,
+            sequence=CALIBRATION_SEQUENCE,
+            grouping=GROUPING_MODE,
+            status="success" if res_success else "failed"
+        )
+        
+        summary_path = SANDBOX_DIR / "phase1_experiment_summary.tsv"
+        if summary_path.exists():
+            with open(summary_path, "a", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f, delimiter="\t")
+                writer.writerow([
+                    run_id, combo_key, time.strftime("%Y-%m-%dT%H:%M:%S"), plan, WEIGHT_MODE, optimizer_mode, BUDGET_MODE,
+                    CALIBRATION_SEQUENCE, GROUPING_MODE, "success" if res_success else "failed", final_score, 0, 0, 0,
+                    "True" if final_score < 999.0 else "False", train_score, valid_score, all_score,
+                    0, 0, 0, 0,
+                    time.time() - OPTIMIZATION_STARTED_AT, str(bool(VALID_TRTS)), str(TRAIN_TRTS), str(VALID_TRTS), str(CASE_DIR)
+                ])
+                
+        if result_schema_view is not None:
+            agg_path = SANDBOX_DIR / "phase1_aggregate_metrics.tsv"
+            if agg_path.exists():
+                agg_rows = build_aggregate_metric_export_rows(context, result_schema_view.aggregate_metrics)
+                with open(agg_path, "a", newline="", encoding="utf-8") as f:
+                    writer = csv.DictWriter(f, fieldnames=AGGREGATE_METRIC_EXPORT_FIELDNAMES, delimiter="\t")
+                    for row in agg_rows:
+                        writer.writerow(build_aggregate_metric_export_value_map(row))
+                        
+            trt_path = SANDBOX_DIR / "phase1_treatment_metrics.tsv"
+            if trt_path.exists():
+                comp_records = build_treatment_comparison_records(
+                    result_schema_view,
+                    observations_by_trt=observations_by_trt_from_arrays(comparable_metrics),
+                    split_by_trt=SPLIT_BY_TRT,
+                    comparable_metrics=comparable_metrics
+                )
+                trt_rows = build_treatment_metric_export_rows(context, comp_records)
+                with open(trt_path, "a", newline="", encoding="utf-8") as f:
+                    writer = csv.DictWriter(f, fieldnames=TREATMENT_METRIC_EXPORT_FIELDNAMES, delimiter="\t")
+                    for row in trt_rows:
+                        writer.writerow(build_treatment_metric_export_value_map(row))
+
+            fig_path = SANDBOX_DIR / "phase1_figure_ready.tsv"
+            if fig_path.exists():
+                with open(fig_path, "a", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f, delimiter="\t")
+                    agg_dict = { (r.split, r.metric): r for r in agg_rows }
+                    for row in trt_rows:
+                        agg_row = agg_dict.get((row.split, row.metric))
+                        if not agg_row: continue
+                        writer.writerow([
+                            run_id, "1", combo_key, plan, WEIGHT_MODE, optimizer_mode, BUDGET_MODE,
+                            CALIBRATION_SEQUENCE, GROUPING_MODE, "success" if res_success else "failed", final_score,
+                            row.metric, row.split, row.trt, f"{row.metric}|{row.split}", combo_key, 
+                            f"{run_id}|{row.metric}|t{row.trt}",
+                            row.observed, row.simulated, row.error, row.abs_error, row.relative_error,
+                            agg_row.count, agg_row.nrmse, agg_row.bias
+                        ])
+                        
+        param_path = SANDBOX_DIR / "phase1_parameters.tsv"
+        if param_path.exists():
+            with open(param_path, "a", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f, delimiter="\t")
+                for i, (name, val) in enumerate(zip(PARAM_NAMES, best_params)):
+                    lb, ub = BOUNDS[i]
+                    is_lb = (val - lb) <= 1e-4
+                    is_ub = (ub - val) <= 1e-4
+                    normalized = (val - lb) / (ub - lb + 1e-8)
+                    writer.writerow([
+                        run_id, PROJECT_CONFIG.get("crop_family", ""), combo_key, name, 
+                        val, lb, ub, str(is_lb), str(is_ub), normalized
+                    ])
 
 if __name__ == "__main__":
     main()
-
