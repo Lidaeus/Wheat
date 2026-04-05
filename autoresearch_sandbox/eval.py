@@ -1963,71 +1963,87 @@ def main():
                     elif r.split == "valid":
                         yield_val_nrmse, yield_val_bias = r.nrmse, r.bias
                         
-        summary_path = SANDBOX_DIR / "phase1_experiment_summary.tsv"
-        if summary_path.exists():
-            with open(summary_path, "a", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f, delimiter="\t")
-                writer.writerow([
-                    run_id, combo_key, time.strftime("%Y-%m-%dT%H:%M:%S"), plan, WEIGHT_MODE, optimizer_mode, BUDGET_MODE,
-                    CALIBRATION_SEQUENCE, GROUPING_MODE, "success" if res_success else "failed", final_score, 0, 0, 0,
-                    "True" if final_score < 999.0 else "False", train_score, valid_score, all_score,
-                    yield_tr_nrmse, yield_tr_bias, yield_val_nrmse, yield_val_bias,
-                    time.time() - OPTIMIZATION_STARTED_AT, str(bool(VALID_TRTS)), str(TRAIN_TRTS), str(VALID_TRTS), str(CASE_DIR)
-                ])
-                
-        if result_schema_view is not None:
-            agg_path = SANDBOX_DIR / "phase1_aggregate_metrics.tsv"
-            if agg_path.exists():
-                agg_rows = build_aggregate_metric_export_rows(context, result_schema_view.aggregate_metrics)
-                with open(agg_path, "a", newline="", encoding="utf-8") as f:
-                    writer = csv.DictWriter(f, fieldnames=AGGREGATE_METRIC_EXPORT_FIELDNAMES, delimiter="\t")
-                    for row in agg_rows:
-                        writer.writerow(build_aggregate_metric_export_value_map(row))
-                        
-            trt_path = SANDBOX_DIR / "phase1_treatment_metrics.tsv"
-            if trt_path.exists():
-                comp_records = build_treatment_comparison_records(
-                    result_schema_view,
-                    observations_by_trt=observations_by_trt_from_arrays(comparable_metrics),
-                    split_by_trt=SPLIT_BY_TRT,
-                    comparable_metrics=comparable_metrics
-                )
-                trt_rows = build_treatment_metric_export_rows(context, comp_records)
-                with open(trt_path, "a", newline="", encoding="utf-8") as f:
-                    writer = csv.DictWriter(f, fieldnames=TREATMENT_METRIC_EXPORT_FIELDNAMES, delimiter="\t")
-                    for row in trt_rows:
-                        writer.writerow(build_treatment_metric_export_value_map(row))
-
-            fig_path = SANDBOX_DIR / "phase1_figure_ready.tsv"
-            if fig_path.exists():
-                with open(fig_path, "a", newline="", encoding="utf-8") as f:
+        import time
+        lock_path = SANDBOX_DIR / ".phase1_export.lock"
+        for _ in range(3000): # wait up to 5 mins
+            try:
+                fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.close(fd)
+                break
+            except FileExistsError:
+                time.sleep(0.1)
+        try:
+            summary_path = SANDBOX_DIR / "phase1_experiment_summary.tsv"
+            if summary_path.exists():
+                with open(summary_path, "a", newline="", encoding="utf-8") as f:
                     writer = csv.writer(f, delimiter="\t")
-                    agg_dict = { (r.split, r.metric): r for r in agg_rows }
-                    for row in trt_rows:
-                        agg_row = agg_dict.get((row.split, row.metric))
-                        if not agg_row: continue
-                        writer.writerow([
-                            run_id, "1", combo_key, plan, WEIGHT_MODE, optimizer_mode, BUDGET_MODE,
-                            CALIBRATION_SEQUENCE, GROUPING_MODE, "success" if res_success else "failed", final_score,
-                            row.metric, row.split, row.trt, f"{row.metric}|{row.split}", combo_key, 
-                            f"{run_id}|{row.metric}|t{row.trt}",
-                            row.observed, row.simulated, row.error, row.abs_error, row.relative_error,
-                            agg_row.count, agg_row.nrmse, agg_row.bias
-                        ])
-                        
-        param_path = SANDBOX_DIR / "phase1_parameters.tsv"
-        if param_path.exists():
-            with open(param_path, "a", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f, delimiter="\t")
-                for i, (name, val) in enumerate(zip(PARAM_NAMES, best_params)):
-                    lb, ub = BOUNDS[i]
-                    is_lb = (val - lb) <= 1e-4
-                    is_ub = (ub - val) <= 1e-4
-                    normalized = (val - lb) / (ub - lb + 1e-8)
                     writer.writerow([
-                        run_id, PROJECT_CONFIG.get("crop_family", ""), combo_key, name, 
-                        val, lb, ub, str(is_lb), str(is_ub), normalized
+                        run_id, combo_key, time.strftime("%Y-%m-%dT%H:%M:%S"), plan, WEIGHT_MODE, optimizer_mode, BUDGET_MODE,
+                        CALIBRATION_SEQUENCE, GROUPING_MODE, "success" if res_success else "failed", final_score, 0, 0, 0,
+                        "True" if final_score < 999.0 else "False", train_score, valid_score, all_score,
+                        yield_tr_nrmse, yield_tr_bias, yield_val_nrmse, yield_val_bias,
+                        time.time() - OPTIMIZATION_STARTED_AT, str(bool(VALID_TRTS)), str(TRAIN_TRTS), str(VALID_TRTS), str(CASE_DIR)
                     ])
+                    
+            if result_schema_view is not None:
+                agg_path = SANDBOX_DIR / "phase1_aggregate_metrics.tsv"
+                if agg_path.exists():
+                    agg_rows = build_aggregate_metric_export_rows(context, result_schema_view.aggregate_metrics)
+                    with open(agg_path, "a", newline="", encoding="utf-8") as f:
+                        writer = csv.DictWriter(f, fieldnames=AGGREGATE_METRIC_EXPORT_FIELDNAMES, delimiter="\t")
+                        for row in agg_rows:
+                            writer.writerow(build_aggregate_metric_export_value_map(row))
+                            
+                trt_path = SANDBOX_DIR / "phase1_treatment_metrics.tsv"
+                if trt_path.exists():
+                    comp_records = build_treatment_comparison_records(
+                        result_schema_view,
+                        observations_by_trt=observations_by_trt_from_arrays(comparable_metrics),
+                        split_by_trt=SPLIT_BY_TRT,
+                        comparable_metrics=comparable_metrics
+                    )
+                    trt_rows = build_treatment_metric_export_rows(context, comp_records)
+                    with open(trt_path, "a", newline="", encoding="utf-8") as f:
+                        writer = csv.DictWriter(f, fieldnames=TREATMENT_METRIC_EXPORT_FIELDNAMES, delimiter="\t")
+                        for row in trt_rows:
+                            writer.writerow(build_treatment_metric_export_value_map(row))
+
+                fig_path = SANDBOX_DIR / "phase1_figure_ready.tsv"
+                if fig_path.exists():
+                    with open(fig_path, "a", newline="", encoding="utf-8") as f:
+                        writer = csv.writer(f, delimiter="\t")
+                        agg_dict = { (r.split, r.metric): r for r in agg_rows }
+                        for row in trt_rows:
+                            agg_row = agg_dict.get((row.split, row.metric))
+                            if not agg_row: continue
+                            writer.writerow([
+                                run_id, "1", combo_key, plan, WEIGHT_MODE, optimizer_mode, BUDGET_MODE,
+                                CALIBRATION_SEQUENCE, GROUPING_MODE, "success" if res_success else "failed", final_score,
+                                row.metric, row.split, row.trt, f"{row.metric}|{row.split}", combo_key, 
+                                f"{run_id}|{row.metric}|t{row.trt}",
+                                row.observed, row.simulated, row.error, row.abs_error, row.relative_error,
+                                agg_row.count, agg_row.nrmse, agg_row.bias
+                            ])
+                            
+            param_path = SANDBOX_DIR / "phase1_parameters.tsv"
+            if param_path.exists():
+                with open(param_path, "a", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f, delimiter="\t")
+                    for i, (name, val) in enumerate(zip(PARAM_NAMES, best_params)):
+                        lb, ub = BOUNDS[i]
+                        is_lb = (val - lb) <= 1e-4
+                        is_ub = (ub - val) <= 1e-4
+                        normalized = (val - lb) / (ub - lb + 1e-8)
+                        writer.writerow([
+                            run_id, PROJECT_CONFIG.get("crop_family", ""), combo_key, name, 
+                            val, lb, ub, str(is_lb), str(is_ub), normalized
+                        ])
+        finally:
+            try:
+                import os
+                os.unlink(lock_path)
+            except OSError:
+                pass
 
 if __name__ == "__main__":
     main()

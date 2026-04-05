@@ -7,6 +7,7 @@ import uuid
 import csv
 from pathlib import Path
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 SANDBOX_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SANDBOX_DIR.parent
@@ -34,22 +35,17 @@ G_MAP = {
 
 # Define Batches as per rules
 BATCH_A = [
-    # W0/W4 x O1 x S1 x G1/G3
-    ("W0", "O1", "S1", "G1"),
-    ("W0", "O1", "S1", "G3"),
-    ("W4", "O1", "S1", "G1"),
-    ("W4", "O1", "S1", "G3"),
+    ("W0", "O1", "S1", "G1"), ("W0", "O1", "S1", "G3"),
+    ("W4", "O1", "S1", "G1"), ("W4", "O1", "S1", "G3"),
 ]
 
 BATCH_B = [
-    # W8/W4 x O1/O2 x G3 x S1/S2
     ("W8", "O1", "G3", "S1"), ("W8", "O1", "G3", "S2"),
     ("W8", "O2", "G3", "S1"), ("W8", "O2", "G3", "S2"),
     ("W4", "O1", "G3", "S1"), ("W4", "O1", "G3", "S2"),
 ]
 
 BATCH_C = [
-    # W8/W4 x G3 x S2 x O1/O2
     ("W8", "O1", "S2", "G3"), ("W8", "O2", "S2", "G3"),
     ("W4", "O1", "S2", "G3"), ("W4", "O2", "S2", "G3"),
 ]
@@ -74,16 +70,39 @@ def init_tsv(path, columns):
             writer = csv.writer(f, delimiter="\t")
             writer.writerow(columns)
 
+def _run_single_subprocess(cmd, env, run_id, combo_key):
+    start_time = time.time()
+    try:
+        res = subprocess.run(cmd, env=env, capture_output=True, text=True)
+        duration = time.time() - start_time
+        status = "success" if res.returncode == 0 else "failed"
+        crop = run_id.split('_')[1] if len(run_id.split('_')) > 1 else "Unknown"
+        
+        if status == "failed":
+            print(f"[{time.strftime('%H:%M:%S')}] ❌ FAILED {combo_key} for {crop} (RC: {res.returncode})", flush=True)
+            print(f"Stderr tail: {res.stderr[-500:]}", flush=True)
+        else:
+            print(f"[{time.strftime('%H:%M:%S')}] ✅ Completed {combo_key} for {crop} in {duration:.1f}s", flush=True)
+    except Exception as e:
+        status = "failed"
+        print(f"[{time.strftime('%H:%M:%S')}] ❌ EXCEPTION {combo_key}: {e}", flush=True)
+    return status
+
 def main():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch", type=str, choices=["Baselines", "BatchA", "BatchB", "BatchC", "BatchD", "All"], default="All", help="Which batch to run")
     parser.add_argument("--repetitions", type=int, default=5, help="Number of repetitions per combination")
+    parser.add_argument("--workers", type=int, default=14, help="Maximum concurrent processes")
     parser.add_argument("--skip-postprocess", action="store_true", help="Skip postprocessing derived metrics")
     args = parser.parse_args()
 
-    print("Starting Phase 1 Execution Roadmap...")
-    print(f"Target: {args.batch}, Repetitions: {args.repetitions}")
+    print("==========================================")
+    print("🌾 Starting Phase 1 Execution Roadmap")
+    print(f"   Target: {args.batch}")
+    print(f"   Repetitions: {args.repetitions}")
+    print(f"   Concurrency: {args.workers} workers")
+    print("==========================================")
     
     # Setup TSV outputs
     summary_path = SANDBOX_DIR / "phase1_experiment_summary.tsv"
@@ -132,12 +151,19 @@ def main():
 
     eval_script = SANDBOX_DIR / "eval.py"
 
-    # RUN BASELINES
+    # VENV Python Executable Lock
+    venv_python = MVP_ROOT / ".venv" / "Scripts" / "python.exe"
+    if not venv_python.exists():
+        venv_python = MVP_ROOT / ".venv" / "bin" / "python"
+    executable = str(venv_python) if venv_python.exists() else sys.executable
+
+    jobs_to_run = []
+
+    # 1. BASELINES QUEUE
     if args.batch in ["Baselines", "All"]:
-        print("--- Running Baselines (B0, B1, B2) ---")
         for crop_name, config_path in crop_configs.items():
             if not config_path.exists():
-                print(f"Skipping baselines for {crop_name}, config not found.")
+                print(f"Skipping baselines for {crop_name}, config not found.", flush=True)
                 continue
                 
             baselines = [
@@ -148,7 +174,6 @@ def main():
             for b_name, w, o, s, g in baselines:
                 run_id = f"{b_name}_{crop_name}_0_{uuid.uuid4().hex[:6]}"
                 combo_key = f"{b_name}"
-                print(f"Running Baseline: {combo_key} for {crop_name}")
                 
                 env = os.environ.copy()
                 env["AR_WEIGHTING"] = w
@@ -162,13 +187,10 @@ def main():
                 env["AR_COMBO_KEY"] = combo_key
                 env["AR_PLAN"] = "Baselines"
 
-                cmd = [sys.executable, str(eval_script)]
-                res = subprocess.run(cmd, env=env, capture_output=True, text=True)
-                if res.returncode != 0:
-                    print(f"Baseline {b_name} failed. Return code: {res.returncode}")
-                    print("Stderr:", res.stderr[-500:])
+                cmd = [executable, str(eval_script)]
+                jobs_to_run.append((cmd, env, run_id, combo_key))
 
-    # RUN SPECIFIC BATCH
+    # 2. GRID QUEUE
     if args.batch in BATCH_MAP:
         batches_to_run = [args.batch]
     elif args.batch == "All":
@@ -177,59 +199,53 @@ def main():
         batches_to_run = []
 
     for batch_name in batches_to_run:
-        run_batch(batch_name, BATCH_MAP[batch_name], crop_configs, eval_script, args.repetitions, summary_path)
-    
+        batch_combinations = BATCH_MAP[batch_name]
+        for crop, config_path in crop_configs.items():
+            if not config_path.exists():
+                continue
+            for w, o, s, g in batch_combinations:
+                combo_key = f"{w}_{o}_{s}_{g}"
+                for rep in range(args.repetitions):
+                    run_id = f"{combo_key}_{crop}_{rep}_{uuid.uuid4().hex[:6]}"
+                    
+                    env = os.environ.copy()
+                    env["AR_WEIGHTING"] = W_MAP.get(w, w)
+                    env["AR_ENGINE"] = O_MAP.get(o, o)
+                    env["AR_SEQUENCE"] = S_MAP.get(s, s)
+                    env["AR_GROUPING"] = G_MAP.get(g, g)
+                    env["AR_PROJECT_CONFIG"] = str(config_path)
+                    env["AR_RANDOM_SEED"] = str(42 + rep)
+
+                    env["AR_PHASE1_EXPORT"] = "1"
+                    env["AR_RUN_ID"] = run_id
+                    env["AR_COMBO_KEY"] = combo_key
+                    env["AR_PLAN"] = batch_name
+                    
+                    cmd = [executable, str(eval_script)]
+                    jobs_to_run.append((cmd, env, run_id, combo_key))
+
+    # 3. DISPATCHER
+    if jobs_to_run:
+        print(f"\n🚀 Dispatched {len(jobs_to_run)} total models for evaluation...", flush=True)
+        try:
+            with ThreadPoolExecutor(max_workers=args.workers) as executor:
+                futures = [executor.submit(_run_single_subprocess, c, e, r, k) for c, e, r, k in jobs_to_run]
+                for i, f in enumerate(as_completed(futures)):
+                    pass # Output is handled strictly by the worker to avoid overlap
+        except KeyboardInterrupt:
+            print("\n🚨 Execution Interrupted by User! Waiting for active workers to shut down...", flush=True)
+            executor.shutdown(wait=False, cancel_futures=True)
+            sys.exit(1)
+
+    print("\n🏁 All processes finished.", flush=True)
+
     if not args.skip_postprocess:
-        print("--- Running Post-Processing to Derive Phase1 Metrics ---")
+        print("--- Running Post-Processing to Derive Phase1 Metrics ---", flush=True)
         try:
             import phase1_postprocess
             phase1_postprocess.main()
         except Exception as e:
             print(f"Error during post-processing: {e}")
-
-def run_batch(batch_name, batch_combinations, crop_configs, eval_script, repetitions, summary_path):
-    print(f"--- Running {batch_name} ---")
-    for crop, config_path in crop_configs.items():
-        if not config_path.exists():
-            print(f"Warning: config for {crop} not found at {config_path}")
-            continue
-
-        for w, o, s, g in batch_combinations:
-            combo_key = f"{w}_{o}_{s}_{g}"
-            print(f"Running Combo: {combo_key} for {crop}")
-            
-            for rep in range(repetitions):
-                run_id = f"{combo_key}_{crop}_{rep}_{uuid.uuid4().hex[:6]}"
-                
-                env = os.environ.copy()
-                env["AR_WEIGHTING"] = W_MAP.get(w, w)
-                env["AR_ENGINE"] = O_MAP.get(o, o)
-                env["AR_SEQUENCE"] = S_MAP.get(s, s)
-                env["AR_GROUPING"] = G_MAP.get(g, g)
-                env["AR_PROJECT_CONFIG"] = str(config_path)
-                env["AR_RANDOM_SEED"] = str(42 + rep)
-
-                env["AR_PHASE1_EXPORT"] = "1"
-                env["AR_RUN_ID"] = run_id
-                env["AR_COMBO_KEY"] = combo_key
-                env["AR_PLAN"] = batch_name
-
-                start_time = time.time()
-                
-                # Execute eval.py
-                cmd = [sys.executable, str(eval_script)]
-                print(f"Executing: {' '.join(cmd)}")
-                
-                # We pipe stdout to see progress if any
-                res = subprocess.run(cmd, env=env, capture_output=True, text=True)
-                
-                duration = time.time() - start_time
-                status = "success" if res.returncode == 0 else "failed"
-
-                if status == "failed":
-                    print(f"Run failed for {run_id}. Return code: {res.returncode}")
-                    print("Stdout:", res.stdout[-500:])
-                    print("Stderr:", res.stderr[-500:])
 
 if __name__ == "__main__":
     main()
