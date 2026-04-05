@@ -1,80 +1,109 @@
 # Autoresearch Setup for DSSAT Parameter Calibration
 
 ## 1. Project Objective
-We are optimizing crop genetic parameters for the DSSAT (Decision Support System for Agrotechnology Transfer) agricultural model. Our goal is to discover the best **mathematical weighting scheme** (Loss Function) to balance multiple conflicting observation metrics (e.g., Yield vs. LAI) across different experimental treatments.
+We are optimizing DSSAT crop genetic parameters with the real DSSAT engine. The current focus is no longer limited to replaying a fixed list of human-written weighting schemes. The new goal is to let an autonomous research loop invent, test, reject, and refine new `strategy.py` loss functions under strict scientific and engineering constraints.
 
-## 2. Your Task as an AI Researcher
-Your task is to iteratively modify the `strategy.py` file. This file must contain a single function `calculate_loss(sim_yield, obs_yield, sim_lai, obs_lai)` that takes in numpy arrays of simulated and observed data, applies a specific weighting strategy, and returns a single scalar loss value to be minimized.
+## 2. Current Granularity
+This project is now operating at the **AI self-innovation** level.
 
-You should systematically explore the 9 advanced weighting schemes provided below.
+The loop should:
+1. Start from a valid existing `strategy.py`
+2. Generate new candidate loss functions
+3. Enforce safety and interface constraints
+4. Evaluate every candidate with the official DSSAT-based `eval.py`
+5. Keep only candidates that improve `Final_Score`
+6. Restore the current best strategy after every failed trial
 
-## 3. Data Interface (`strategy.py` contract)
-You must strictly adhere to this function signature in `strategy.py`:
+## 3. Editable Surface
+The scientific search surface is intentionally narrow:
+- `strategy.py` is the evolving hypothesis
+- `eval.py` is the read-mostly measurement harness
+- `auto_evolve.py` is the autonomous scientist and experiment manager
+
+The loop must treat `eval.py` as the metric oracle and must not change the meaning of `Final_Score`.
+
+## 4. `strategy.py` Contract
+Every candidate must define exactly one valid loss function:
 
 ```python
 import numpy as np
 
 def calculate_loss(sim_yield, obs_yield, sim_lai, obs_lai):
-    \"\"\"
-    Calculate the combined loss for Yield and LAI.
-    
-    Args:
-        sim_yield (np.ndarray): Simulated Yield values.
-        obs_yield (np.ndarray): Observed Yield values.
-        sim_lai (np.ndarray): Simulated Leaf Area Index (LAI) values.
-        obs_lai (np.ndarray): Observed Leaf Area Index (LAI) values.
-        
-    Returns:
-        float: A single scalar loss value. (Lower is better)
-    \"\"\"
-    # YOUR WEIGHTING STRATEGY LOGIC HERE
-    pass
+    return float(...)
 ```
 
-## 4. The 9 Weighting Schemes to Explore
-Please generate code for these strategies one by one in your iterations:
+Requirements:
+- Input arrays are already masked for missing observations by `eval.py`
+- Output must be a single finite scalar
+- Only `numpy` may be imported
+- No file I/O, subprocess, randomness, hidden state, global caches, or environment access
+- The function must remain deterministic for the same inputs
 
-1.  **Inverse Variance Weighting**: Weight = 1 / Variance(obs).
-2.  **Inverse RMSE Weighting**: Weight = 1 / Baseline_RMSE.
-3.  **CV-based Weighting (The R-version approach)**: 
-    - Compute fitness: `fitness = exp(-(sim - obs)^2 / (2 * (0.5 * obs)^2))`
-    - Apply user exponent penalty: `fitness_yield = fitness ^ 1`, `fitness_lai = fitness ^ 10`
-    - Total loss = `-prod(fitness_yield) * prod(fitness_lai)` (minimize negative fitness)
-4.  **Min-Max Normalization Weighting**: Map all errors to [0, 1] bounds.
-5.  **Mean Normalization Weighting (NRMSE)**: Divide RMSE by the mean of the observations.
-6.  **Log-transformation Weighting**: Loss = (log(sim) - log(obs))^2. Good for large scale differences.
-7.  **Equal Contribution Dynamic Balance**: Dynamically adjust weights during iteration so `Weight_yield * Loss_yield == Weight_lai * Loss_lai`.
-8.  **AgMIP Two-step WLS**: Step 1 calculates unweighted variances, Step 2 uses them as weights.
-9.  **Pareto Dominance (Scalarized)**: Convert multi-objective pareto logic into a penalty-based scalar loss.
+## 5. Scientific Boundary Conditions
+The autonomous search must stay inside these agronomic and numerical boundaries:
 
-## 5. Constraints
-- Only modify `strategy.py`.
-- Do not modify `eval.py` or `eval_fast.py`.
-- Use `numpy` for all array operations.
-- Ensure the function never returns NaN or Infinity (add small epsilons `1e-8` to denominators if necessary).
-- You will be evaluated based on the `Final_Score` printed by the evaluation script.
+### A. Scale fairness
+Yield and LAI live on very different numerical scales. Candidate losses must explicitly or implicitly correct that imbalance through normalization, transformation, robust percentage-style errors, or balanced scalarization.
 
-## 6. Indicator Grouping & Sequencing Guidelines (Future Architecture)
-Based on crop modeling principles (e.g., AgMIP and standard DSSAT protocols) and the metric types defined in `ParameterOutput.csv`, metrics should be handled logically rather than just dumping them into a single mathematical formula.
+### B. Treatment consistency
+A candidate that fits one treatment very well and fails badly on another is scientifically weaker than a candidate with slightly worse mean fit but stronger cross-treatment consistency.
 
-### A. Metric Grouping
-Metrics should be clustered into three functional groups. This prevents scale dominance and allows assigning group-level weights:
-1.  **Phenology (物候):** `ADAP` (Anthesis Date), `MDAP` (Maturity Date). Unit: Days.
-2.  **Growth/Canopy (生长/冠层):** `LAIX` (Max LAI), `CWAM` (Tops weight at maturity/Biomass). Unit: Index or kg/ha.
-3.  **Yield (产量):** `HWAM` (Grain yield), `HWUM` (Unit weight). Unit: kg/ha or g/unit.
+### C. Smoothness for noisy Fortran models
+Loss surfaces should remain stable enough for derivative-free search. Avoid highly discontinuous or numerically flat formulations that cause DSSAT calibration to stall.
 
-### B. Sequential Calibration (先物候、后生长、最后产量) & Autoresearch Role
-Instead of optimizing all 7 parameters simultaneously (which creates high dimensionality and equifinality/异物同效 issues), a sequential pipeline is recommended. **Autoresearch's primary value is to explore and evaluate different weighting schemes across these phases**, not just in a final fine-tuning step.
-- **Phase 1 (Phenology):** Fix G1, G2, G3. Optimize `P1V`, `P1D`, `P5`, `PHINT` using ONLY `ADAP` and `MDAP` loss.
-- **Phase 2 (Growth):** Freeze phenology parameters. Optimize `G1` (or canopy parameters) using ONLY `LAIX` and `CWAM` loss.
-- **Phase 3 (Yield):** Freeze phenology and growth. Optimize `G2`, `G3` using ONLY `HWAM` and `HWUM` loss.
+### D. Respect the real engine
+All conclusions must come from real DSSAT runs. No surrogate model, no fake evaluator, no replacement of the official simulation step.
 
-### C. Pure MGDA Scheme (Baseline Comparison)
-In addition to testing the grouped weighting schemes above, you must also design a **Pure MGDA (Multiple Gradient Descent Algorithm)** scheme.
-- This scheme should **not** group observation indicators (i.e., it optimizes Yield and LAI directly together without artificial clustering).
-- Its purpose is to serve as a pure mathematical baseline to compare against the grouped strategies.
+## 6. Innovation Directions
+The autonomous loop should search for useful combinations of the following building blocks:
+- Error transforms: NRMSE, relative absolute error, SMAPE, log-domain RMSE, Huber-style relative error
+- Aggregation rules: additive, L2 distance, mixed mean-max
+- Balance control: penalties on metric imbalance
+- Robustness control: penalties on treatment-to-treatment error variance
+- Cross-metric coupling: light penalties that discourage solving one metric by sacrificing the other
 
-### D. Real-World Robustness (Checklist)
-- **Treatment Sensitivity (处理间一致性):** Ensure loss functions penalize high variance in errors across treatments. A parameter set that performs perfectly in a well-watered treatment but terribly in a drought treatment is worse than one that performs reasonably well in both.
-- **Zero or Missing Observations:** Metrics like `LAI` might not be observed in all treatments (represented as `-99.0` in DSSAT files). The evaluation logic safely masks missing data, but your weighting schemes should not divide by zero if an array is empty.
-- **Crop-Specific Exponents:** We have reserved an `importance_exponent` field in the crop JSON configuration. Agricultural experts use this to subjectively bias the optimization (e.g., Yield ^ 10, LAI ^ 1). Your weighting scheme should be able to accept these exponent parameters to tilt the loss landscape according to expert knowledge.
+The target is not mathematical novelty for its own sake. The target is a lower `Final_Score` with interpretable behavior.
+
+## 7. What Success Looks Like
+An acceptable autonomous innovation run should produce:
+- A reproducible evaluation log in `evolution_log.md`
+- A final `strategy.py` that is the best-performing candidate discovered in the run
+- A clear comparison against the user-provided starting strategy
+
+## 8. Execution Command
+Use:
+
+```bash
+python auto_evolve.py --mode innovate --rounds 2 --beam-width 2 --seed-limit 4
+```
+
+This performs a bounded innovation session with elite selection, mutation, DSSAT evaluation, and automatic keep/discard behavior.
+
+## 9. Round 4 Campaign Profile
+The current campaign is **Round 4: attribution-first controlled innovation**.
+
+Round 4 must keep the following boundaries fixed:
+- `B0` remains the only negative-optimization reference
+- `B1` is diagnostic only
+- `B2` remains an external benchmark and is not counted as sandbox-native innovation
+- The editable scientific surface remains centered on `strategy.py`
+- `eval.py` remains the metric oracle and must keep the meaning of `Final_Score`
+
+Round 4 should compare the evolving native strategy against:
+- `B0 Official Frozen`
+- `Current_Strategy_Baseline`
+- `W4_Min_Max_Equal`
+- `W6_Log_Transformation`
+- `W8_DSSAT_PEST_Group_Max`
+
+Round 4 reporting should not stop at `Final_Score`. It should also inspect:
+- `Final_Valid_Score`
+- `TRAIN/VALID/ALL_MEAN_NRMSE`
+- Yield-fit diagnostics such as `VALID_HWAM_NRMSE` and `VALID_HWAM_BIAS`
+- Whether a candidate is negative optimization relative to `B0`
+
+Round 4 success is defined as:
+- A lower or competitive `Final_Score`
+- No deterioration serious enough to invalidate validation behavior
+- No clear worsening of overall NRMSE or yield-fit diagnostics
+- Clear attribution that the gain comes from sandbox-native loss design rather than borrowed external strategy contracts

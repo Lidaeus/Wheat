@@ -1,6 +1,7 @@
 import pandas as pd
 import os
 import glob
+from pathlib import Path
 
 def aggregate_results(base_path):
     iter_dirs = sorted(glob.glob(os.path.join(base_path, "iter_*")))
@@ -35,8 +36,11 @@ def aggregate_results(base_path):
 
 if __name__ == "__main__":
     # Find the latest run directory
-    runs_dir = r"C:\DSSAT48\Wheat\mvp_pest_mgda\runs\_runs"
-    subdirs = [os.path.join(runs_dir, d) for d in os.listdir(runs_dir) if os.path.isdir(os.path.join(runs_dir, d))]
+    project_root = Path(__file__).resolve().parents[1]
+    runs_dir = (project_root / "runs" / "_runs").resolve()
+    if not runs_dir.exists():
+        runs_dir = (project_root.parent / "autoresearch_sandbox" / "runs" / "_runs").resolve()
+    subdirs = [os.path.join(str(runs_dir), d) for d in os.listdir(runs_dir) if os.path.isdir(os.path.join(runs_dir, d))] if runs_dir.exists() else []
     if not subdirs:
         print("No run directories found.")
     else:

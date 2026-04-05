@@ -863,7 +863,7 @@ $iterMax = [int]$iterMaxRaw
                 param($workDir, $projRootPath, $logPath)
                 Set-Location $workDir
                 $ErrorActionPreference = 'Continue'
-                python (Join-Path $projRootPath "src\build_pest_setup.py") 2>&1 | Out-File -LiteralPath $logPath -Encoding utf8
+                python (Join-Path $projRootPath "src\pest_builder.py") run --work-dir $workDir 2>&1 | Out-File -LiteralPath $logPath -Encoding utf8
                 return $LASTEXITCODE
             } -ArgumentList @($iterDir, $projRoot, $buildLog) -LogPath $buildLog -StageLabel "Build PEST setup"
             if ($exitCode -ne 0) {
@@ -879,7 +879,7 @@ $iterMax = [int]$iterMaxRaw
                     $runStatus = 'skipped'
                     break RunMain
                 }
-                throw "build_pest_setup.py failed (exit $exitCode)"
+                throw "pest_builder.py run failed (exit $exitCode)"
             }
             if (Test-Path -LiteralPath (Join-Path $iterDir "params.dat")) {
                 Copy-Item -LiteralPath (Join-Path $iterDir "params.dat") -Destination (Join-Path $iterParamsDir "params.dat") -Force

@@ -1,4 +1,4 @@
-# 项目技术评审报告（批判性 Review）
+﻿# 项目技术评审报告（批判性 Review）
 
 ## 1. 总览与结论
 - 当前代码已跑通核心闭环：DSSAT → PEST++（JCO/REI）→ MGDA → 三方案对照评估（baseline/pest/mgda）。
@@ -33,12 +33,12 @@
 
 ## 3. 证据与代码参考
 - 批量运行状态机与日志
-  - 参考：run_mvp.ps1 的 RunMain 段（[run_mvp.ps1:L612-L706](file:///c:/DSSAT48/Wheat/mvp_pest_mgda/scripts/run_mvp.ps1#L612-L706)）
-  - 失败样例：_batch/20260207_044528（pestpp-glm.exe failed），成功样例的 meta.json 多显示 run_pestpp=start（[meta.json](file:///c:/DSSAT48/Wheat/mvp_pest_mgda/runs/_batch/20260207_052000_multi/001_project/meta.json)）
+  - 参考：run_mvp.ps1 的 RunMain 段（[run_mvp.ps1:L612-L706](file:///d:/Wheat/Wheat/mvp_pest_mgda/scripts/run_mvp.ps1#L612-L706)）
+  - 失败样例：_batch/20260207_044528（pestpp-glm.exe failed），成功样例的 meta.json 多显示 run_pestpp=start（[meta.json](file:///d:/Wheat/Wheat/mvp_pest_mgda/runs/_batch/20260207_052000_multi/001_project/meta.json)）
 - 对比评估实现
-  - 参考：compare_three.py 的 _calc_summary 与汇总导出（[compare_three.py:L60-L252](file:///c:/DSSAT48/Wheat/mvp_pest_mgda/src/compare_three.py#L60-L252)，[compare_three.py:L741-L928](file:///c:/DSSAT48/Wheat/mvp_pest_mgda/src/compare_three.py#L741-L928)）
+  - 参考：compare_three.py 的 _calc_summary 与汇总导出（[compare_three.py:L60-L252](file:///d:/Wheat/Wheat/mvp_pest_mgda/src/compare_three.py#L60-L252)，[compare_three.py:L741-L928](file:///d:/Wheat/Wheat/mvp_pest_mgda/src/compare_three.py#L741-L928)）
 - DSSAT 运行与观测解析
-  - 参考：run_model.py 的 FileX 渲染与 Evaluate/PlantGro 解析（[run_model.py:L637-L668](file:///c:/DSSAT48/Wheat/mvp_pest_mgda/src/run_model.py#L637-L668)）
+  - 参考：run_model.py 的 FileX 渲染与 Evaluate/PlantGro 解析（[run_model.py:L637-L668](file:///d:/Wheat/Wheat/mvp_pest_mgda/src/run_model.py#L637-L668)）
 - 文档要求与现状差异
   - 参考：项目开发文档第 10 节的“极致方案”与调参优化方案第 5 节风险点（[项目开发文档_PEST-MGDA-DSSAT.md](file:///c:/DSSAT48/Wheat/docs/项目开发文档_PEST-MGDA-DSSAT.md)，[PEST-MGDA 调参优化方案.md](file:///c:/DSSAT48/Wheat/docs/PEST-MGDA%20%E8%B0%83%E5%8F%82%E4%BC%98%E5%8C%96%E6%96%B9%E6%A1%88.md)）
 
@@ -65,10 +65,10 @@
 
 ## 7. 准确性与正当性核查（证据复盘）
 - 评估口径问题
-  - compare_three.py 的汇总仅以 scenario 为键，未按 cultivar/species 过滤；代码显示按 rows 全量聚合（见 [compare_three.py:L741-L835](file:///c:/DSSAT48/Wheat/mvp_pest_mgda/src/compare_three.py#L741-L835)），与文档“分品种评估”不一致。
-  - 向日葵与甘蔗的 compare_params 字段差异明显（示例：向日葵为 ppsen/slavr/xfrt…，甘蔗为 maxparce/stkpfmax/suca…），当前 compare_params 无统一列集，跨作物难以对比（见 [sunflower compare_params.csv](file:///c:/DSSAT48/Wheat/mvp_pest_mgda/runs/_batch/20260207_052000_multi/003_project_sunflower_ucco9301/iter_000/compare_params.csv)、[sugarcane compare_params.csv](file:///c:/DSSAT48/Wheat/mvp_pest_mgda/runs/_batch/20260207_053500_multi2/002_project_sugarcane_sato8902/iter_000/compare_params.csv)）。
+  - compare_three.py 的汇总仅以 scenario 为键，未按 cultivar/species 过滤；代码显示按 rows 全量聚合（见 [compare_three.py:L741-L835](file:///d:/Wheat/Wheat/mvp_pest_mgda/src/compare_three.py#L741-L835)），与文档“分品种评估”不一致。
+  - 向日葵与甘蔗的 compare_params 字段差异明显（示例：向日葵为 ppsen/slavr/xfrt…，甘蔗为 maxparce/stkpfmax/suca…），当前 compare_params 无统一列集，跨作物难以对比（见 [sunflower compare_params.csv](file:///d:/Wheat/Wheat/mvp_pest_mgda/runs/_batch/20260207_052000_multi/003_project_sunflower_ucco9301/iter_000/compare_params.csv)、[sugarcane compare_params.csv](file:///d:/Wheat/Wheat/mvp_pest_mgda/runs/_batch/20260207_053500_multi2/002_project_sugarcane_sato8902/iter_000/compare_params.csv)）。
 - 批量运行状态机与 meta 口径
-  - 多个批量目录的 meta.json 显示 run_status=success 而 stage 停在 run_pestpp=start（例如 [001_project meta.json](file:///c:/DSSAT48/Wheat/mvp_pest_mgda/runs/_batch/20260207_052000_multi/001_project/meta.json)），与成功定义不一致；另有失败样例正确记录（exit -1）。
+  - 多个批量目录的 meta.json 显示 run_status=success 而 stage 停在 run_pestpp=start（例如 [001_project meta.json](file:///d:/Wheat/Wheat/mvp_pest_mgda/runs/_batch/20260207_052000_multi/001_project/meta.json)），与成功定义不一致；另有失败样例正确记录（exit -1）。
 - noptmax 策略混用
   - 观察到 nopt_list 既有 5 也有 -1 的记录，且跨作物目录混用，未与“pest-only vs mgda 生成 J/残差”清晰绑定，影响对比的正当性。
 - 观测与误差模型
@@ -102,4 +102,5 @@
 - 里程碑 M1：状态机与 meta 修复、noptmax 策略统一、分品种汇总落地。
 - 里程碑 M2：作物家族映射与 compare_params 统一列集、观测配置化与 σ 预白化。
 - 里程碑 M3：归档标准（pareto_archive、cases/overall 汇总）、多起点与 ND 集统计。
+
 

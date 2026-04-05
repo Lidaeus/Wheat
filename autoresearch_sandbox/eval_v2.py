@@ -3,7 +3,7 @@ import sys
 import numpy as np
 import subprocess
 from pathlib import Path
-from scipy.optimize import least_squares, dual_annealing
+from scipy.optimize import least_squares
 import time
 
 # =====================================================================
@@ -137,8 +137,8 @@ def run_strategy(name, use_groups):
 
 if __name__ == "__main__":
     print("Evaluating Baseline Default...")
-    y, l = run_dssat_and_get_simulated(INITIAL_GUESS)
-    base_score = calculate_true_nrmse(y, l)
+    sim_yield, sim_lai = run_dssat_and_get_simulated(INITIAL_GUESS)
+    base_score = calculate_true_nrmse(sim_yield, sim_lai)
     print(f"Default Parameters Score: {base_score:.6f}")
 
     run_strategy("Native PEST-GLM (No Group Weights)", use_groups=False)

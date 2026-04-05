@@ -1,23 +1,24 @@
 {
   "paths": {
-    "dssat_case_dir": "C:\\DSSAT48\\Wheat",
-    "wha_path": "C:\\DSSAT48\\Wheat\\KSAS8101.WHA",
-    "wht_path": "C:\\DSSAT48\\Wheat\\KSAS8101.WHT",
-    "obs_a_path": "C:\\DSSAT48\\Wheat\\KSAS8101.WHA",
-    "obs_t_path": "C:\\DSSAT48\\Wheat\\KSAS8101.WHT",
-    "cul_path": "C:\\DSSAT48\\Genotype\\WHCER048.CUL",
-    "dssat_exe": "C:\\DSSAT48\\DSCSM048.EXE"
+    "dssat_root": "",
+    "dssat_case_dir": "Wheat",
+    "wha_path": "SWSW7501.WHA",
+    "wht_path": "SWSW7501.WHT",
+    "obs_a_path": "SWSW7501.WHA",
+    "obs_t_path": "SWSW7501.WHT",
+    "cul_path": "Genotype\\WHCER048.CUL",
+    "dssat_exe": "DSCSM048.EXE"
   },
   "scenario": {
-    "filex": "KSAS8101.WHX",
-    "base_filex": "KSAS8101.WHX",
+    "filex": "SWSW7501.WHX",
+    "base_filex": "SWSW7501.WHX",
     "trts": [
       1,
       2,
-      3,
-      4,
-      5,
-      6
+      8,
+      9,
+      13,
+      14
     ]
   },
   "adapter": {

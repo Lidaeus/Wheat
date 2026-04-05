@@ -7,7 +7,7 @@ Write-Host ">>> Starting Path A: Pure PEST-GLM Independent Long-Run <<<" -Foregr
 # 1. Setup
 $env:PEST_NOPTMAX = '30'
 $env:USE_MGDA_ALPHAS = '0'
-python "$projRoot\src\build_pest_setup.py"
+python "$projRoot\src\pest_builder.py" run --work-dir (Get-Location).Path
 
 # 2. Run PEST++ 
 Write-Host "Running PEST++ GLM for 30 iterations..." -ForegroundColor Cyan

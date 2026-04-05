@@ -80,13 +80,14 @@
     "groups": {
       "obs_yield": {
         "patterns": [
-          "hwam_"
+          "pwam_",
+          "pwad_"
         ],
         "weight": 1.0
       },
-      "obs_laix": {
+      "obs_biomass": {
         "patterns": [
-          "laix_"
+          "cwad_"
         ],
         "weight": 1.0
       },
@@ -96,9 +97,9 @@
         ],
         "weight": 1.0
       },
-      "obs_swad": {
+      "obs_pwad": {
         "patterns": [
-          "swad_"
+          "pwad_"
         ],
         "weight": 1.0
       }
@@ -116,12 +117,12 @@
     }
   },
   "metrics": {
-    "yield_var": "HWAM",
-    "laix_var": "LAIX",
+    "yield_var": "PWAM",
+    "laix_var": "",
     "t_vars": [
       "LAID",
-      "LWAD",
-      "SWAD"
+      "CWAD",
+      "PWAD"
     ]
   },
   "crop_family": "Cabbage"

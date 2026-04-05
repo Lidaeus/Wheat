@@ -19,6 +19,37 @@
     "wth_updates": [],
     "sol_updates": []
   },
+  "provenance": {
+    "research_boundary": {
+      "default_policy": "reuse_mvp_code_as_infrastructure_only",
+      "strategy_policy": "do_not_count_mvp_strategy_as_sandbox_gain_unless_explicitly_labeled",
+      "reporting_requirement": "all_mvp_strategy_borrowing_must_be_explicitly_tagged"
+    },
+    "reused_infrastructure": [
+      {
+        "component": "run_model.py",
+        "source": "C:\\DSSAT48\\Wheat\\mvp_pest_mgda\\src\\run_model.py",
+        "classification": "execution_infrastructure",
+        "used_by": ["eval.py"],
+        "counts_as_sandbox_innovation": false
+      }
+    ],
+    "borrowed_strategy_contracts": [
+      {
+        "component": "build_pest_setup.py",
+        "source": "C:\\DSSAT48\\Wheat\\mvp_pest_mgda\\src\\build_pest_setup.py",
+        "classification": "strategy_borrowed",
+        "used_by": ["eval.py:o2_pestpp_ies"],
+        "borrowed_elements": ["observation_grouping", "obs_weighting_contract", "pst_generation_contract"],
+        "counts_as_sandbox_innovation": false
+      }
+    ],
+    "sandbox_native_strategy": {
+      "component": "strategy.py",
+      "classification": "sandbox_strategy_research",
+      "counts_as_sandbox_innovation": true
+    }
+  },
   "split": {
     "mode": "ratio",
     "valid_ratio": 0.2,
@@ -26,7 +57,24 @@
     "train_trts": [],
     "valid_trts": []
   },
+  "scheduler": {
+    "task_parallelism": 1,
+    "crop_parallelism": 1,
+    "retry_limit": 0,
+    "heartbeat_interval_sec": 15,
+    "stale_timeout_sec": 1800,
+    "sandbox_reuse": true,
+    "copy_case_once": true,
+    "aggregate_write_mode": "single_writer"
+  },
   "params": {
+    "bounds_source": {
+      "system": "DSSAT-PEST",
+      "artifact": "C:\\DSSAT48\\Wheat\\DSSAT-PEST\\ParameterOutput.csv",
+      "crop": "Wheat",
+      "rows": "33-39",
+      "policy": "keep_identical_to_dssat_pest_unless_explicit_override"
+    },
     "bounds": {
       "p1v": [5.0, 60.0, "g_cul"],
       "p1d": [0.0, 95.0, "g_cul"],
@@ -46,6 +94,74 @@
       "g_cul": {
         "inctyp": "relative",
         "derinc": 0.05
+      }
+    }
+  },
+  "baselines": {
+    "negative_optimization_reference": "b0_official_frozen",
+    "profiles": {
+      "b0_official_frozen": {
+        "enabled": true,
+        "role": "official_negative_optimization_reference",
+        "param_source": {
+          "type": "inline_values",
+          "label": "official_cultivar",
+          "values": {
+            "p1v": 9.33,
+            "p1d": 3.12,
+            "p5": 331.4,
+            "g1": 12.87,
+            "g2": 62.22,
+            "g3": 2.215,
+            "phint": 86.0
+          }
+        },
+        "bounds_policy": "ignore_project_bounds",
+        "evaluation_contract": {
+          "engine": "default_dssat",
+          "weight_mode": "active_experiment",
+          "grouping_mode": "active_experiment",
+          "metrics": "active_experiment",
+          "split": "active_experiment"
+        },
+        "participates_in_negative_optimization": true
+      },
+      "b1_sandbox_feasible": {
+        "enabled": true,
+        "role": "feasibility_diagnostic_reference",
+        "param_source": {
+          "type": "derived_from_profile",
+          "profile": "b0_official_frozen",
+          "transform": "clip_to_project_bounds"
+        },
+        "bounds_policy": "clip_to_project_bounds",
+        "evaluation_contract": {
+          "engine": "default_dssat",
+          "weight_mode": "active_experiment",
+          "grouping_mode": "active_experiment",
+          "metrics": "active_experiment",
+          "split": "active_experiment"
+        },
+        "participates_in_negative_optimization": false
+      },
+      "b2_dssat_pest_full": {
+        "enabled": true,
+        "role": "external_process_benchmark",
+        "param_source": {
+          "type": "external_artifact",
+          "working_dir": "C:\\DSSAT48\\Wheat\\DSSAT-PEST",
+          "artifact_path": "",
+          "selector": "target_cultivar"
+        },
+        "bounds_policy": "use_external_contract",
+        "evaluation_contract": {
+          "mode": "external_dssat_pest",
+          "working_dir": "C:\\DSSAT48\\Wheat\\DSSAT-PEST",
+          "weight_source": "external_dssat_pest",
+          "grouping_source": "external_dssat_pest",
+          "metrics_source": "external_dssat_pest"
+        },
+        "participates_in_negative_optimization": false
       }
     }
   },

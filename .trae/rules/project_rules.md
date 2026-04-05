@@ -13,5 +13,10 @@
 ## 项目记忆
 
 - DSSAT 根目录: C:\DSSAT48
+- Python 虚拟环境: D:\Wheat\Wheat\mvp_pest_mgda\.venv
+- Python 可执行文件: D:\Wheat\Wheat\mvp_pest_mgda\.venv\Scripts\python.exe
+- Pip 可执行文件: D:\Wheat\Wheat\mvp_pest_mgda\.venv\Scripts\pip.exe
+- Lint/Typecheck 建议解释器: D:\Wheat\Wheat\mvp_pest_mgda\.venv\Scripts\python.exe
 - 作物与实测文件: C:\DSSAT48\Wheat\SWSW7501.WHA, C:\DSSAT48\Wheat\SWSW7501.WHT, C:\DSSAT48\Wheat\SWSW7501.WHX
 - 目标函数: 使每个处理的模拟值总体上更接近实测值
+- 所有的正式运行规模至少应该为standard

@@ -1,11 +1,29 @@
 [tool.ruff]
-src = ["src"]
+src = ["src", "../autoresearch_sandbox"]
 line-length = 120
+exclude = [
+    "../autoresearch_sandbox/__pycache__",
+    "../autoresearch_sandbox/artifacts",
+    "../autoresearch_sandbox/dssat_case",
+    "../autoresearch_sandbox/formal_batch",
+    "../autoresearch_sandbox/runs",
+    "../autoresearch_sandbox/_run_eval_mode_matrix_tmp.py",
+    "../autoresearch_sandbox/eval_baseline.py",
+    "../autoresearch_sandbox/eval_v2.py",
+    "../autoresearch_sandbox/eval_v3.py",
+]
 
 [tool.mypy]
-files = ["src"]
+files = ["src", "../autoresearch_sandbox"]
 ignore_missing_imports = true
 warn_unused_ignores = true
 warn_redundant_casts = true
 warn_unused_configs = true
 pretty = true
+exclude = '''(?x)(
+    ^\.\./autoresearch_sandbox/(__pycache__|artifacts|dssat_case|formal_batch|runs)(/|$)
+  | ^\.\./autoresearch_sandbox/_run_eval_mode_matrix_tmp\.py$
+  | ^\.\./autoresearch_sandbox/eval_baseline\.py$
+  | ^\.\./autoresearch_sandbox/eval_v2\.py$
+  | ^\.\./autoresearch_sandbox/eval_v3\.py$
+)'''

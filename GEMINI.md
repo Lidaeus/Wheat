@@ -51,7 +51,4 @@ The system relies on several environment variables for fine-tuning, though defau
 - **Regression:** A "Gold Standard" case (minimal TRT/FileX) should be used to verify that new changes don't break the end-to-end loop.
 - **Error Handling:** Errors in DSSAT or PEST++ execution must be captured and logged in the iteration's `meta.json` with appropriate error codes (e.g., `E_RUN_DSSAT`, `E_PESTPP`).
 
-## Documentation References
-- [项目开发文档 (Development Doc)](docs/项目开发文档_PEST-MGDA-DSSAT.md): High-level architecture and implementation plan.
-- [PEST-MGDA 调参优化方案 (Optimization Scheme)](docs/PEST-MGDA%20调参优化方案.md): Detailed math and strategies for multi-objective calibration.
-- [排查方案 (Troubleshooting)](docs/排查方案_拟合异常诊断.md): Guide for diagnosing fitting anomalies.
+

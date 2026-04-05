@@ -11,7 +11,7 @@
   },
   "scenario": {
     "filex": "UFGA8201.MZX",
-    "base_filex": "UFGA8201_base.MZX",
+    "base_filex": "UFGA8201.MZX",
     "trts": [1, 2, 3]
   },
   "params": {

@@ -1,20 +1,309 @@
 from __future__ import annotations
 
+import argparse
+from dataclasses import dataclass
 import os
+import random
 import re
 import subprocess
 import time
 from pathlib import Path
 
+from calibration_core.fixed_width import rewrite_initial_sh2o, rewrite_sol_layers, rewrite_wth_daily
+from pest_runner import (
+    ProtocolExecutionContext,
+    ProtocolIssue,
+    build_contract_report_payload,
+    build_protocol_execution,
+    build_run_manifest_payload,
+    load_runtime_request_env,
+    resolve_protocol_options,
+    write_contract_report,
+    write_run_manifest,
+)
+from result_schema import MetricsByTreatment, TreatmentMetrics, build_pest_output_text
+from case_runtime import (
+    CaseRuntime,
+    RuntimeFileState,
+    ensure_case_support_files,
+    ensure_local_runtime,
+    ensure_nonempty_cultivar_file,
+    infer_cul_path_from_inp,
+    patch_cultivar_dir_in_inp_inh,
+    resolve_case_runtime,
+    resolve_case_dir,
+    resolve_cultivar_path,
+    resolve_metrics_cfg,
+    resolve_summary_var_codes,
+    resolve_t_vars,
+    resolve_runtime_file_state,
+)
 from dssat_io import (
     extract_cultivar_code,
     load_project_config,
     pick_eval_value,
     read_eval_row,
     read_table_row,
+    resolve_crop_family,
+    resolve_dssat_exe_path,
+    resolve_dssat_genotype_dir,
     resolve_param_mapping,
+    resolve_project_config_path,
     rewrite_cul_values,
 )
+
+
+OUTPUT_FILES = ["Evaluate.OUT", "Summary.OUT", "PlantGro.OUT", "PlantGr2.OUT", "WARNING.OUT"]
+
+
+def _apply_runtime_request(runtime_request_path: str) -> Path | None:
+    request_path_raw = str(runtime_request_path).strip() or str(os.environ.get("AR_RUNTIME_REQUEST_PATH", "")).strip()
+    if not request_path_raw:
+        return None
+    request_path = Path(request_path_raw).resolve()
+    os.environ.update(load_runtime_request_env(request_path))
+    os.environ["AR_RUNTIME_REQUEST_PATH"] = str(request_path)
+    return request_path
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--runtime-request", default="")
+    args, _ = parser.parse_known_args()
+    return args
+
+
+@dataclass(frozen=True)
+class PreparedCaseRun:
+    cfg: dict
+    project_config_path: Path | None
+    dssat_dir: Path
+    filex_name: str
+    trts: list[int]
+    case_runtime: CaseRuntime
+    file_state: RuntimeFileState
+    keep_outputs: bool
+    base: Path
+    live_filex: Path
+    cul_path: Path
+    cultivar_code: str
+    trts_env: str
+
+
+def _resolve_run_id(cwd: Path) -> str:
+    return str(os.environ.get("AR_RUN_ID", "")).strip() or cwd.name
+
+
+def _resolve_requested_summary_codes(cfg: dict) -> list[str]:
+    metrics_cfg = resolve_metrics_cfg(cfg)
+    yield_code = str(metrics_cfg.get("yield_var", "YIELD")).strip().upper()
+    if yield_code == "YIELD":
+        yield_code = "HWAM"
+    laix_code = str(metrics_cfg.get("laix_var", "LAIX")).strip().upper()
+    return resolve_summary_var_codes(
+        yield_code,
+        laix_code,
+        env_extra_summary_vars=os.environ.get("DSSAT_EXTRA_SUMMARY_VARS", ""),
+    )
+
+
+def _resolve_split_assignments(cfg: dict, trts: list[int]) -> dict[int, str]:
+    split_cfg = cfg.get("split", {})
+    mode = str(split_cfg.get("mode", "trt")).strip().lower()
+    all_trts = [int(trt) for trt in trts]
+    train = {int(trt) for trt in (split_cfg.get("train_trts") or []) if str(trt).strip()}
+    valid = {int(trt) for trt in (split_cfg.get("valid_trts") or []) if str(trt).strip()}
+
+    ratio = None
+    if "valid_ratio" in split_cfg:
+        try:
+            ratio = float(split_cfg.get("valid_ratio"))
+        except (TypeError, ValueError):
+            ratio = None
+    if ratio is None and not train and not valid and len(all_trts) > 1:
+        ratio = 0.2
+
+    if mode in {"ratio", "random"} and ratio is None:
+        ratio = 0.2
+
+    if ratio is not None and not train and not valid and all_trts:
+        ratio = max(0.0, min(1.0, float(ratio)))
+        if ratio > 0.0:
+            seed = split_cfg.get("seed", split_cfg.get("random_seed", 0))
+            rnd = random.Random(int(seed))
+            shuffled = list(all_trts)
+            rnd.shuffle(shuffled)
+            n_valid = max(1, int(round(len(shuffled) * ratio)))
+            valid = set(shuffled[:n_valid])
+            train = set(shuffled[n_valid:])
+
+    if not train and not valid:
+        train = set(all_trts)
+    else:
+        if not train:
+            train = set(all_trts) - set(valid)
+        if not valid:
+            valid = set(all_trts) - set(train)
+
+    overlap = set(train) & set(valid)
+    if overlap:
+        train = set(train) - overlap
+
+    return {int(trt): ("valid" if int(trt) in valid else "train") for trt in all_trts}
+
+
+def _build_runtime_manifest_payload(prepared: PreparedCaseRun, cwd: Path) -> dict[str, object]:
+    project_root = Path(__file__).resolve().parents[1]
+    output_files = [name for name in OUTPUT_FILES if (prepared.dssat_dir / name).exists()]
+    bounds_preview_path = cwd / "parameter_bounds_preview.csv"
+    split_assignments = _resolve_split_assignments(prepared.cfg, prepared.trts)
+    context = ProtocolExecutionContext(
+        run_id=_resolve_run_id(cwd),
+        crop=resolve_crop_family(prepared.cfg, prepared.dssat_dir),
+        runtime_dir=cwd,
+        case_dir=prepared.dssat_dir,
+        project_root=project_root,
+        project_config_path=prepared.project_config_path,
+        filex_name=prepared.filex_name,
+        trts=tuple(int(trt) for trt in prepared.trts),
+    )
+    protocol = resolve_protocol_options(
+        keep_outputs=prepared.keep_outputs,
+        allow_missing_wht_dates=prepared.case_runtime.output.allow_missing_dates,
+        split_assignments=split_assignments,
+    )
+    execution = build_protocol_execution(cwd=cwd, env=os.environ)
+    return build_run_manifest_payload(
+        context,
+        protocol=protocol,
+        execution=execution,
+        scenario={
+            "filex_name": prepared.filex_name,
+            "base_filex_name": prepared.base.name,
+            "trts": [int(trt) for trt in prepared.trts],
+        },
+        paths={
+            "case_dir": prepared.dssat_dir,
+            "params_path": Path(os.environ.get("PARAMS_PATH", str(cwd / "params.dat"))),
+            "bounds_preview_path": bounds_preview_path,
+            "cul_path": prepared.cul_path,
+            "obs_a_path": prepared.case_runtime.observation.obs_a_path,
+            "obs_wht_path": prepared.case_runtime.observation.obs_wht_path,
+            "dssat_exe": str((prepared.cfg.get("paths", {}) or {}).get("dssat_exe", "")),
+            "pest_output_path": cwd / "pest_out.dat",
+            "runtime_request_path": str(os.environ.get("AR_RUNTIME_REQUEST_PATH", "")).strip(),
+        },
+        resolved_output={
+            "summary_metrics": list(prepared.case_runtime.output.var_codes),
+            "t_vars": list(prepared.case_runtime.output.t_vars),
+            "wht_dates_by_trt": {
+                str(int(trt)): [int(date) for date in dates]
+                for trt, dates in sorted(prepared.case_runtime.observation.wht_dates_by_trt.items())
+            },
+            "available_output_files": output_files,
+        },
+    )
+
+
+def _build_contract_report(prepared: PreparedCaseRun, cwd: Path) -> dict[str, object]:
+    metrics_cfg = resolve_metrics_cfg(prepared.cfg)
+    requested_summary_codes = _resolve_requested_summary_codes(prepared.cfg)
+    requested_t_vars = resolve_t_vars(metrics_cfg)
+    resolved_summary_codes = list(prepared.case_runtime.output.var_codes)
+    resolved_t_vars = list(prepared.case_runtime.output.t_vars)
+    split_assignments = _resolve_split_assignments(prepared.cfg, prepared.trts)
+    missing_summary = [code for code in requested_summary_codes if code not in resolved_summary_codes]
+    missing_treatment_dates = sorted(
+        int(trt)
+        for trt in prepared.trts
+        if requested_t_vars and not prepared.case_runtime.observation.wht_dates_by_trt.get(int(trt))
+    )
+    issues: list[ProtocolIssue] = []
+    if missing_summary:
+        issues.append(
+            ProtocolIssue(
+                code="missing_summary_metrics",
+                severity="warning",
+                message="Requested summary metrics are not fully available in the resolved observation contract.",
+                details={"metrics": missing_summary},
+            )
+        )
+    obs_wht_path = prepared.case_runtime.observation.obs_wht_path
+    if requested_t_vars and (obs_wht_path is None or not obs_wht_path.exists()):
+        issues.append(
+            ProtocolIssue(
+                code="missing_wht_observations",
+                severity="warning",
+                message="Timeseries metrics were requested but the observation T/WHT file is missing.",
+                details={"requested_t_vars": requested_t_vars},
+            )
+        )
+    elif missing_treatment_dates:
+        issues.append(
+            ProtocolIssue(
+                code="missing_wht_dates",
+                severity="warning",
+                message="Some treatments do not have observation dates in the resolved T/WHT contract.",
+                details={"trts": missing_treatment_dates},
+            )
+        )
+    context = ProtocolExecutionContext(
+        run_id=_resolve_run_id(cwd),
+        crop=resolve_crop_family(prepared.cfg, prepared.dssat_dir),
+        runtime_dir=cwd,
+        case_dir=prepared.dssat_dir,
+        project_root=Path(__file__).resolve().parents[1],
+        project_config_path=prepared.project_config_path,
+        filex_name=prepared.filex_name,
+        trts=tuple(int(trt) for trt in prepared.trts),
+    )
+    protocol = resolve_protocol_options(
+        keep_outputs=prepared.keep_outputs,
+        allow_missing_wht_dates=prepared.case_runtime.output.allow_missing_dates,
+        split_assignments=split_assignments,
+    )
+    execution = build_protocol_execution(cwd=cwd, env=os.environ)
+    bounds_preview_path = cwd / "parameter_bounds_preview.csv"
+    split_counts: dict[str, int] = {}
+    for split_name in split_assignments.values():
+        split_counts[str(split_name)] = split_counts.get(str(split_name), 0) + 1
+    return build_contract_report_payload(
+        context,
+        status="degraded" if issues else "ok",
+        requested={
+            "summary_metrics": requested_summary_codes,
+            "t_vars": requested_t_vars,
+            "yield_var": str(metrics_cfg.get("yield_var", "YIELD")).strip().upper() or "YIELD",
+            "laix_var": str(metrics_cfg.get("laix_var", "LAIX")).strip().upper() or "LAIX",
+            "trts": [int(trt) for trt in prepared.trts],
+        },
+        resolved={
+            "summary_metrics": resolved_summary_codes,
+            "t_vars": resolved_t_vars,
+            "allow_missing_dates": bool(prepared.case_runtime.output.allow_missing_dates),
+            "wht_dates_by_trt": {
+                str(int(trt)): [int(date) for date in dates]
+                for trt, dates in sorted(prepared.case_runtime.observation.wht_dates_by_trt.items())
+            },
+        },
+        paths={
+            "runtime_dir": cwd,
+            "obs_a_path": prepared.case_runtime.observation.obs_a_path,
+            "obs_wht_path": prepared.case_runtime.observation.obs_wht_path,
+            "case_dir": prepared.dssat_dir,
+            "bounds_preview_path": bounds_preview_path,
+        },
+        protocol=protocol,
+        execution=execution,
+        issues=issues,
+        summary={
+            "issue_count": len(issues),
+            "missing_summary_metrics": missing_summary,
+            "missing_wht_treatments": missing_treatment_dates,
+            "split_counts": split_counts,
+            "parameter_bounds_preview_present": bounds_preview_path.exists(),
+        },
+    )
 
 
 def _try_unlink(path: Path, tries: int = 10, sleep_s: float = 0.1) -> None:
@@ -29,8 +318,25 @@ def _try_unlink(path: Path, tries: int = 10, sleep_s: float = 0.1) -> None:
     return
 
 
+def _kill_dssat_processes(exe: Path) -> None:
+    if os.environ.get("DSSAT_SKIP_TASKKILL", "").strip().lower() in {"1", "true", "yes", "y"}:
+        return
+    image_name = exe.name.strip()
+    if not image_name:
+        return
+    try:
+        subprocess.run(
+            ["taskkill", "/F", "/IM", image_name],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return
+
+
 def _load_project_config(project_root: Path) -> dict:
-    return load_project_config(project_root)
+    return load_project_config(project_root, crop=os.environ.get("PROJECT_CROP", ""))
 
 
 def _read_params(params_path: Path) -> dict[str, float]:
@@ -56,204 +362,30 @@ def _sh2o_token(value: float) -> str:
     return s
 
 
-def _rewrite_initial_sh2o(filex_in: Path, filex_out: Path, sh2o_by_icbl: dict[int, float]) -> None:
-    updates = [{"ICBL": int(k), "SH2O": float(v)} for k, v in sh2o_by_icbl.items()]
-    _rewrite_fixed_block_from_template(
-        filex_in,
-        filex_out,
-        "@C",
-        ["ICBL"],
-        updates,
-        required_cols={"ICBL", "SH2O"},
-    )
-
-
 def _run_dssat(filex: str, trt: int, cwd: Path, cfg: dict) -> None:
-    cfg_exe = cfg.get("paths", {}).get("dssat_exe", "")
-    exe = Path(os.environ.get("DSSAT_EXE", cfg_exe or r"C:\DSSAT48\DSCSM048.EXE"))
+    exe = resolve_dssat_exe_path(Path(__file__).resolve().parents[1], cfg=cfg)
     cmd = [str(exe), "C", filex, str(trt)]
-    cp = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True)
-    if cp.returncode != 0:
-        raise RuntimeError(f"DSSAT failed: {cp.returncode}\nSTDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}")
+    last_error = None
+    for attempt in range(3):
+        _kill_dssat_processes(exe)
+        _try_unlink(cwd / "LUN.LST", tries=5, sleep_s=0.1)
+        cp = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True)
+        if cp.returncode == 0:
+            return
+        last_error = RuntimeError(f"DSSAT failed: {cp.returncode}\nSTDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}")
+        stderr_u = (cp.stderr or "").upper()
+        if "LUN.LST" not in stderr_u and "SEVERE (38)" not in stderr_u:
+            break
+        _kill_dssat_processes(exe)
+        time.sleep(0.2 * (attempt + 1))
+    if last_error is not None:
+        raise last_error
 
 
 def _choose_case_dir(cwd: Path, project_root: Path, cfg: dict) -> Path:
-    env_dir = os.environ.get("DSSAT_CASE_DIR", "").strip()
-    if env_dir:
-        return Path(env_dir).resolve()
-    cfg_dir = cfg.get("paths", {}).get("dssat_case_dir", "")
-    if cfg_dir:
-        return Path(cfg_dir).resolve()
-    local = (cwd / "dssat_case").resolve()
-    if local.exists():
-        return local
-    return (project_root / "data" / "dssat").resolve()
+    return resolve_case_dir(cwd, project_root, cfg, env_case_dir=os.environ.get("DSSAT_CASE_DIR", ""))
 
 
-def _patch_cultivar_dir_in_inp_inh(dssat_dir: Path, cultivar_dir: Path) -> None:
-    new_dir = str(cultivar_dir.resolve()) + "\\"
-    targets = [dssat_dir / "DSSAT48.INP", dssat_dir / "DSSAT48.INH"]
-    for p in targets:
-        if not p.exists():
-            continue
-        raw = p.read_text(encoding="utf-8", errors="ignore").splitlines(keepends=True)
-        out: list[str] = []
-        changed = False
-        for line in raw:
-            row = line.rstrip("\r\n")
-            ending = line[len(row) :]
-            if p.name.upper().endswith(".INP"):
-                if row.startswith("CULTIVAR") and ".CUL" in row.upper() and "C:\\" in row:
-                    idx = row.index("C:\\")
-                    old_tail = row[idx:]
-                    repl = new_dir.ljust(len(old_tail))[: len(old_tail)]
-                    orig_len = len(row)
-                    row = row[:idx] + repl
-                    if len(row) != orig_len:
-                        raise RuntimeError("DSSAT48.INP row length mismatch after path replace")
-                    if row[idx : idx + len(old_tail)] != repl:
-                        raise RuntimeError("DSSAT48.INP path slice mismatch after replace")
-                    changed = True
-            else:
-                if ".CUL" in row.upper() and "C:\\" in row:
-                    idx = row.index("C:\\")
-                    old_tail = row[idx:]
-                    repl = new_dir.ljust(len(old_tail))[: len(old_tail)]
-                    orig_len = len(row)
-                    row = row[:idx] + repl
-                    if len(row) != orig_len:
-                        raise RuntimeError("DSSAT48.INH row length mismatch after path replace")
-                    if row[idx : idx + len(old_tail)] != repl:
-                        raise RuntimeError("DSSAT48.INH path slice mismatch after replace")
-                    changed = True
-            out.append(row + ending)
-        if changed:
-            p.write_text("".join(out), encoding="utf-8")
-
-
-def _parse_fixed_header_spans(header: str) -> dict[str, tuple[int, int]]:
-    matches = list(re.finditer(r"\S+", header))
-    cols = [m.group(0).lstrip("@").strip() for m in matches]
-    return {c: (matches[i].start(), matches[i].end()) for i, c in enumerate(cols)}
-
-
-def _format_like_field(existing: str, width: int, value: float) -> str:
-    s = existing.strip()
-    if not s:
-        out = f"{value:>{width}.2f}"
-    elif "." in s:
-        decimals = len(s.split(".", 1)[1])
-        out = f"{value:>{width}.{decimals}f}"
-        stripped = out.strip()
-        if s.startswith(".") or s.startswith("-."):
-            if stripped.startswith("-0."):
-                stripped = "-." + stripped[3:]
-            elif stripped.startswith("0."):
-                stripped = "." + stripped[2:]
-            out = stripped.rjust(width)
-    else:
-        out = f"{int(round(value)):>{width}d}"
-    if len(out) > width:
-        raise RuntimeError(f"Value {value} does not fit width {width}")
-    return out
-
-
-def _apply_fixed_block_updates(
-    raw: list[str],
-    header_prefix: str,
-    key_cols: list[str],
-    updates: list[dict[str, float]],
-    required_cols: set[str] | None = None,
-) -> list[str]:
-    out: list[str] = []
-    in_block = False
-    spans: dict[str, tuple[int, int]] = {}
-    key_index = {tuple(str(u[k]).strip() for k in key_cols): u for u in updates}
-    for line in raw:
-        row = line.rstrip("\r\n")
-        ending = line[len(row) :]
-        if row.startswith(header_prefix):
-            spans = _parse_fixed_header_spans(row)
-            if required_cols and not required_cols.issubset(set(spans.keys())):
-                out.append(line)
-                in_block = False
-                continue
-            in_block = True
-            out.append(line)
-            continue
-        if in_block:
-            if row.startswith("*") or row.startswith("@") or not row.strip() or row.lstrip().startswith("!"):
-                in_block = False
-                out.append(line)
-                continue
-            if not spans:
-                out.append(line)
-                continue
-            key = tuple(row[spans[c][0] : spans[c][1]].strip() for c in key_cols)
-            upd = key_index.get(key)
-            if upd is None:
-                out.append(line)
-                continue
-            row_chars = list(row)
-            orig_len = len(row)
-            for c, v in upd.items():
-                if c in key_cols:
-                    continue
-                if c not in spans:
-                    continue
-                a, b = spans[c]
-                existing = row[a:b]
-                width = b - a
-                repl = _format_like_field(existing, width, float(v))
-                row_chars[a:b] = list(repl)
-            new_row = "".join(row_chars)
-            if len(new_row) != orig_len:
-                raise RuntimeError(f"Row length mismatch in fixed block: {len(new_row)} != {orig_len}")
-            for c, v in upd.items():
-                if c in key_cols or c not in spans:
-                    continue
-                a, b = spans[c]
-                got = new_row[a:b].strip()
-                want = _format_like_field(row[a:b], b - a, float(v)).strip()
-                if got != want:
-                    raise RuntimeError(f"Round-trip mismatch for {c} in fixed block: {got} != {want}")
-            out.append(new_row + ending)
-            continue
-        out.append(line)
-    return out
-
-
-def _rewrite_fixed_block(
-    path: Path,
-    header_prefix: str,
-    key_cols: list[str],
-    updates: list[dict[str, float]],
-    required_cols: set[str] | None = None,
-) -> None:
-    raw = path.read_text(encoding="utf-8", errors="ignore").splitlines(keepends=True)
-    out = _apply_fixed_block_updates(raw, header_prefix, key_cols, updates, required_cols)
-    path.write_text("".join(out), encoding="utf-8")
-
-
-def _rewrite_fixed_block_from_template(
-    template_path: Path,
-    output_path: Path,
-    header_prefix: str,
-    key_cols: list[str],
-    updates: list[dict[str, float]],
-    required_cols: set[str] | None = None,
-) -> None:
-    raw = template_path.read_text(encoding="utf-8", errors="ignore").splitlines(keepends=True)
-    out = _apply_fixed_block_updates(raw, header_prefix, key_cols, updates, required_cols)
-    output_path.write_text("".join(out), encoding="utf-8")
-
-
-def rewrite_wth_daily(wth_path: Path, updates_by_date: list[dict[str, float]]) -> None:
-    _rewrite_fixed_block(wth_path, "@DATE", ["DATE"], updates_by_date)
-
-
-def rewrite_sol_layers(sol_path: Path, updates_by_slb: list[dict[str, float]]) -> None:
-    _rewrite_fixed_block(sol_path, "@SLB", ["SLB"], updates_by_slb)
 
 
 def _parse_trts(value: str) -> list[int]:
@@ -267,8 +399,8 @@ def _parse_trts(value: str) -> list[int]:
     return out
 
 
-def _extract_metrics_from_row(row: dict[str, str], var_codes: list[str]) -> dict[str, float]:
-    out: dict[str, float] = {}
+def _extract_metrics_from_row(row: dict[str, str], var_codes: list[str]) -> TreatmentMetrics:
+    out: TreatmentMetrics = {}
     for code in var_codes:
         code_u = str(code).strip().upper()
         if not code_u:
@@ -280,55 +412,14 @@ def _extract_metrics_from_row(row: dict[str, str], var_codes: list[str]) -> dict
     return out
 
 
-def _extract_eval_metrics(eval_path: Path, var_codes: list[str]) -> dict[str, float]:
+def _extract_eval_metrics(eval_path: Path, var_codes: list[str]) -> TreatmentMetrics:
     row = read_eval_row(eval_path)
     return _extract_metrics_from_row(row, var_codes)
 
 
-def _extract_table_metrics(path: Path, var_codes: list[str]) -> dict[str, float]:
+def _extract_table_metrics(path: Path, var_codes: list[str]) -> TreatmentMetrics:
     row = read_table_row(path)
     return _extract_metrics_from_row(row, var_codes)
-
-
-def _read_wht_dates_by_trt(wht_path: Path, trts: list[int]) -> dict[int, list[int]]:
-    if not wht_path.exists():
-        return {}
-    lines = wht_path.read_text(encoding="utf-8", errors="ignore").splitlines()
-    header = None
-    for line in lines:
-        if line.startswith("@TRNO"):
-            header = line
-            break
-    if not header:
-        return {}
-
-    cols = [c.lstrip("@").strip() for c in header.split()]
-    if "TRNO" not in cols or "DATE" not in cols:
-        return {}
-    i_trno = cols.index("TRNO")
-    i_date = cols.index("DATE")
-
-    dates_by_trt: dict[int, list[int]] = {}
-    wanted = {int(t) for t in trts}
-    for line in lines:
-        if not line.strip() or line.lstrip().startswith("!") or line.startswith("@") or line.startswith("*"):
-            continue
-        parts = line.split()
-        if len(parts) <= max(i_trno, i_date):
-            continue
-        try:
-            trno = int(parts[i_trno])
-            date = int(parts[i_date])
-        except ValueError:
-            continue
-        if int(trno) not in wanted:
-            continue
-        dates_by_trt.setdefault(int(trno), []).append(int(date))
-
-    for trt, ds in list(dates_by_trt.items()):
-        dates_by_trt[int(trt)] = sorted(set(int(d) for d in ds))
-
-    return dates_by_trt
 
 
 def _yyddd_to_year_doy(yyddd: int) -> tuple[int, int]:
@@ -480,58 +571,100 @@ def _rewrite_cul_params(cul_path: Path, cultivar_code: str, updates: dict[str, f
     rewrite_cul_values(cul_path, cultivar_code, {str(k).strip().upper(): float(v) for k, v in updates.items()})
 
 
-def _infer_cul_path_from_inp(dssat_dir: Path, cfg: dict) -> Path | None:
-    cfg_paths = cfg.get("paths", {})
-    inp_name = str(cfg_paths.get("inp_name", "")).strip() or "DSSAT48.INP"
-    inp_path = dssat_dir / inp_name
-    if not inp_path.exists():
-        inp_path = dssat_dir / "DSSAT48.INP"
-        if not inp_path.exists():
-            return None
+def _clear_output_files(dssat_dir: Path) -> None:
+    for name in OUTPUT_FILES:
+        _try_unlink(dssat_dir / name)
 
-    cul_file_name = None
-    cul_src_dir = None
-    for raw in inp_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        if not raw.startswith("CULTIVAR"):
-            continue
-        if ".CUL" not in raw.upper():
-            continue
-        toks = raw.split()
-        for tok in toks:
-            if tok.upper().endswith(".CUL"):
-                cul_file_name = tok.strip()
-                break
-        if "C:\\" in raw:
-            cul_src_dir = raw[raw.index("C:\\") :].strip()
-        break
 
-    geno_dir = dssat_dir / "GENOTYPE"
-    if cul_file_name and geno_dir.exists():
-        in_case = geno_dir / cul_file_name
-        if in_case.exists():
-            return in_case
-
-    if cul_src_dir and cul_file_name:
+def execute_treatment(trt: int, filex_name: str, dssat_dir: Path, cfg: dict, case_runtime: CaseRuntime) -> TreatmentMetrics:
+    _clear_output_files(dssat_dir)
+    _run_dssat(filex_name, int(trt), dssat_dir, cfg)
+    eval_path = dssat_dir / "Evaluate.OUT"
+    metrics = _extract_eval_metrics(eval_path, case_runtime.output.var_codes)
+    summary_path = dssat_dir / "Summary.OUT"
+    if summary_path.exists():
         try:
-            src = (Path(cul_src_dir) / cul_file_name).resolve()
-            if src.exists():
-                return src
+            summary_metrics = _extract_table_metrics(summary_path, case_runtime.output.var_codes)
+            for key, value in summary_metrics.items():
+                if key not in metrics:
+                    metrics[key] = value
         except Exception:
-            return None
+            pass
 
-    return None
+    dates = case_runtime.observation.wht_dates_by_trt.get(int(trt), [])
+    if dates:
+        plantgro_path = dssat_dir / "PlantGro.OUT"
+        try:
+            timeseries = _extract_plantgro_vars_at_dates(
+                plantgro_path,
+                dates,
+                case_runtime.output.t_vars,
+                allow_missing=case_runtime.output.allow_missing_dates,
+            )
+        except RuntimeError as e:
+            raise RuntimeError(f"[TRT {int(trt)}] {e}")
+        for date, values in timeseries.items():
+            for key, value in values.items():
+                metrics[f"{str(key).strip().lower()}_d{int(date)}"] = float(value)
+
+    return metrics
 
 
-def main() -> None:
-    cwd = Path.cwd()
-    params_path = Path(os.environ.get("PARAMS_PATH", str(cwd / "params.dat")))
+def _restore_runtime_files(file_state: RuntimeFileState) -> None:
+    file_state.live_filex_path.write_text(file_state.live_filex_original, encoding="utf-8")
+    file_state.cul_path.write_text(file_state.cul_original, encoding="utf-8")
+    if file_state.wth_original is not None and file_state.wth_path:
+        file_state.wth_path.write_text(file_state.wth_original, encoding="utf-8")
+    if file_state.sol_original is not None and file_state.sol_path:
+        file_state.sol_path.write_text(file_state.sol_original, encoding="utf-8")
+
+
+def execute_case(
+    base: Path,
+    live_filex: Path,
+    cul_path: Path,
+    cultivar_code: str,
+    filex_name: str,
+    dssat_dir: Path,
+    cfg: dict,
+    trts: list[int],
+    case_runtime: CaseRuntime,
+    file_state: RuntimeFileState,
+    keep_outputs: bool,
+) -> MetricsByTreatment:
+    if case_runtime.input_plan.wth_updates and case_runtime.input_plan.wth_path is not None:
+        rewrite_wth_daily(case_runtime.input_plan.wth_path, case_runtime.input_plan.wth_updates)
+    if case_runtime.input_plan.sol_updates and case_runtime.input_plan.sol_path is not None:
+        rewrite_sol_layers(case_runtime.input_plan.sol_path, case_runtime.input_plan.sol_updates)
+
+    _clear_output_files(dssat_dir)
+
+    try:
+        if case_runtime.input_plan.has_sh2o:
+            rewrite_initial_sh2o(base, live_filex, case_runtime.input_plan.sh2o_by_icbl)
+        if case_runtime.input_plan.cul_updates:
+            _rewrite_cul_params(cul_path, cultivar_code, case_runtime.input_plan.cul_updates)
+
+        metrics_by_trt: MetricsByTreatment = {}
+        for trt in trts:
+            metrics_by_trt[int(trt)] = execute_treatment(int(trt), filex_name, dssat_dir, cfg, case_runtime)
+        return metrics_by_trt
+    finally:
+        _restore_runtime_files(file_state)
+        if not keep_outputs:
+            _clear_output_files(dssat_dir)
+
+
+def prepare_case_run(cwd: Path | None = None) -> PreparedCaseRun:
+    run_cwd = Path.cwd() if cwd is None else Path(cwd)
+    params_path = Path(os.environ.get("PARAMS_PATH", str(run_cwd / "params.dat")))
     params = _read_params(params_path)
 
     trts_env = os.environ.get("DSSAT_TRTS", "").strip()
     if trts_env:
         trts = _parse_trts(trts_env)
     else:
-        trts_path = cwd / "dssat_trts.txt"
+        trts_path = run_cwd / "dssat_trts.txt"
         if trts_path.exists():
             trts = _parse_trts(trts_path.read_text(encoding="utf-8", errors="ignore"))
         else:
@@ -540,15 +673,17 @@ def main() -> None:
     keep_outputs = os.environ.get("DSSAT_KEEP_OUTPUTS", "0").strip().lower() in {"1", "true", "yes", "y"}
 
     project_root = Path(__file__).resolve().parents[1]
+    project_config_path = resolve_project_config_path(project_root, crop=os.environ.get("PROJECT_CROP", ""))
     cfg = _load_project_config(project_root)
-    dssat_dir = _choose_case_dir(cwd, project_root, cfg)
+    dssat_dir = _choose_case_dir(run_cwd, project_root, cfg)
+    ensure_case_support_files(dssat_dir, project_root)
     param_map, _ = resolve_param_mapping(cfg, dssat_dir)
     if param_map:
         mapped_params: dict[str, float] = {}
-        for k, v in params.items():
-            k_l = str(k).strip().lower()
-            mapped = param_map.get(k_l, k_l)
-            mapped_params[mapped] = float(v)
+        for key, value in params.items():
+            key_l = str(key).strip().lower()
+            mapped = param_map.get(key_l, key_l)
+            mapped_params[mapped] = float(value)
         params = mapped_params
 
     filex_name = cfg.get("scenario", {}).get("filex", "KSAS8101.WHX")
@@ -560,215 +695,103 @@ def main() -> None:
     live_filex = dssat_dir / filex_name
     if not live_filex.exists():
         raise FileNotFoundError(f"Missing live FileX: {live_filex}")
-    live_original = live_filex.read_text(encoding="utf-8", errors="ignore")
 
-    cul_env = os.environ.get("CUL_PATH", "").strip() or os.environ.get("WH_CUL_PATH", "").strip()
-    if cul_env:
-        cul_path = Path(cul_env)
-    else:
-        cfg_paths = cfg.get("paths", {})
-        cfg_cul = str(cfg_paths.get("cul_path", "")).strip() or str(cfg_paths.get("wh_cul_path", "")).strip()
-        if cfg_cul:
-            cul_path = Path(cfg_cul)
-        else:
-            inferred = _infer_cul_path_from_inp(dssat_dir, cfg)
-            if inferred is not None:
-                cul_path = inferred
-            else:
-                geno_dir = dssat_dir / "GENOTYPE"
-                culs = sorted(geno_dir.glob("*.CUL")) if geno_dir.exists() else []
-                cul_path = culs[0] if culs else Path(r"C:\DSSAT48\Genotype\WHCER048.CUL")
-    cul_original = cul_path.read_text(encoding="utf-8", errors="ignore")
+    cul_path = resolve_cultivar_path(
+        dssat_dir,
+        cfg,
+        env_cul_path=os.environ.get("CUL_PATH", ""),
+        env_wh_cul_path=os.environ.get("WH_CUL_PATH", ""),
+        project_root=project_root,
+    )
+    ensure_nonempty_cultivar_file(cul_path, project_root, dssat_dir)
+    inferred_cul = infer_cul_path_from_inp(dssat_dir, cfg)
+    if inferred_cul is not None:
+        ensure_nonempty_cultivar_file(inferred_cul, project_root, dssat_dir)
+    fallback_root_cul = resolve_dssat_genotype_dir(project_root, cfg=cfg) / cul_path.name
+    ensure_nonempty_cultivar_file(fallback_root_cul, project_root, dssat_dir)
+    runtime_exe, runtime_genotype = ensure_local_runtime(
+        project_root,
+        dssat_dir,
+        cul_path,
+        cfg,
+        env_runtime_root=os.environ.get("DSSAT_RUNTIME_ROOT", ""),
+        env_dssat_exe=os.environ.get("DSSAT_EXE", ""),
+    )
+    cfg.setdefault("paths", {})["dssat_exe"] = str(runtime_exe)
+    runtime_cul_path = runtime_genotype / cul_path.name
     cultivar_code = _extract_cultivar_code(live_filex)
 
-    if cul_path.exists() and (dssat_dir / "GENOTYPE").exists() and cul_path.parent.resolve() == (dssat_dir / "GENOTYPE").resolve():
-        _patch_cultivar_dir_in_inp_inh(dssat_dir, cul_path.parent)
+    patch_cultivar_dir_in_inp_inh(dssat_dir, runtime_genotype)
+    case_runtime = resolve_case_runtime(
+        dssat_dir,
+        cfg,
+        live_filex,
+        trts,
+        params,
+        param_map,
+        env_obs_a_path=os.environ.get("DSSAT_OBS_A_PATH", ""),
+        env_extra_summary_vars=os.environ.get("DSSAT_EXTRA_SUMMARY_VARS", ""),
+        env_allow_missing=os.environ.get("DSSAT_ALLOW_MISSING_WHT_DATES", ""),
+    )
+    file_state = resolve_runtime_file_state(live_filex, runtime_cul_path, case_runtime.input_plan)
+    return PreparedCaseRun(
+        cfg=cfg,
+        project_config_path=project_config_path,
+        dssat_dir=dssat_dir,
+        filex_name=filex_name,
+        trts=trts,
+        case_runtime=case_runtime,
+        file_state=file_state,
+        keep_outputs=keep_outputs,
+        base=base,
+        live_filex=live_filex,
+        cul_path=runtime_cul_path,
+        cultivar_code=cultivar_code,
+        trts_env=trts_env,
+    )
 
-    cfg_paths = cfg.get("paths", {})
-    t_path_raw = str(cfg_paths.get("obs_t_path", "")).strip() or str(cfg_paths.get("wht_path", "")).strip()
-    wht_dates_by_trt: dict[int, list[int]] = {}
-    if t_path_raw:
-        wht_path = Path(t_path_raw)
-        if not wht_path.is_absolute():
-            wht_path = dssat_dir / wht_path
-        if wht_path.exists():
-            wht_dates_by_trt = _read_wht_dates_by_trt(wht_path, trts)
 
-    adapter = cfg.get("adapter", {})
-    wth_updates = adapter.get("wth_updates", [])
-    sol_updates = adapter.get("sol_updates", [])
-    wth_path_raw = str(adapter.get("wth_path", "")).strip()
-    sol_path_raw = str(adapter.get("sol_path", "")).strip()
-    wth_path = Path(wth_path_raw) if wth_path_raw else None
-    sol_path = Path(sol_path_raw) if sol_path_raw else None
-    if wth_path and not wth_path.is_absolute():
-        wth_path = dssat_dir / wth_path
-    if sol_path and not sol_path.is_absolute():
-        sol_path = dssat_dir / sol_path
+def main() -> None:
+    args = parse_args()
+    _apply_runtime_request(args.runtime_request)
+    prepared = prepare_case_run()
+    cwd = Path.cwd()
+    write_run_manifest(cwd, _build_runtime_manifest_payload(prepared, cwd))
+    write_contract_report(cwd, _build_contract_report(prepared, cwd))
+    metrics_by_trt = execute_case(
+        prepared.base,
+        prepared.live_filex,
+        prepared.cul_path,
+        prepared.cultivar_code,
+        prepared.filex_name,
+        prepared.dssat_dir,
+        prepared.cfg,
+        prepared.trts,
+        prepared.case_runtime,
+        prepared.file_state,
+        prepared.keep_outputs,
+    )
 
-    wth_original = None
-    sol_original = None
-    if wth_updates:
-        if not wth_path or not wth_path.exists():
-            raise FileNotFoundError("WTH path not found for wth_updates")
-        wth_original = wth_path.read_text(encoding="utf-8", errors="ignore")
-        rewrite_wth_daily(wth_path, wth_updates)
-    if sol_updates:
-        if not sol_path or not sol_path.exists():
-            raise FileNotFoundError("SOL path not found for sol_updates")
-        sol_original = sol_path.read_text(encoding="utf-8", errors="ignore")
-        rewrite_sol_layers(sol_path, sol_updates)
-
-    for p in ["Evaluate.OUT", "Summary.OUT", "PlantGro.OUT", "PlantGr2.OUT", "WARNING.OUT"]:
-        _try_unlink(dssat_dir / p)
-
-    has_sh2o = any(str(k).lower().startswith("sh2o_") for k in params.keys())
-    sh2o_by_icbl = {15: params.get("sh2o_15", 0.205), 30: params.get("sh2o_30", 0.170)} if has_sh2o else {}
-
-    cul_updates: dict[str, float] = {}
-    cfg_cul_params = cfg.get("cul", {}).get("params", None)
-    if isinstance(cfg_cul_params, list) and cfg_cul_params:
-        wanted = []
-        for x in cfg_cul_params:
-            x_l = str(x).strip().lower()
-            if not x_l:
-                continue
-            wanted.append(param_map.get(x_l, x_l))
-    else:
-        wanted = [str(k).strip().lower() for k in params.keys() if not str(k).lower().startswith("sh2o_")]
-    for k in wanted:
-        if k in params:
-            cul_updates[k] = float(params[k])
-    metrics_cfg = cfg.get("metrics", {}) or cfg.get("variables", {}) or {}
-    
-    # Abstract yields
-    yield_var_cfg = str(metrics_cfg.get("yield_var", "YIELD")).strip().upper()
-    yield_code = yield_var_cfg if yield_var_cfg != "YIELD" else "HWAM"
-    
-    laix_code = str(metrics_cfg.get("laix_var", "LAIX")).strip().upper()
-    cfg_paths = cfg.get("paths", {})
-    a_path_env = os.environ.get("DSSAT_OBS_A_PATH") if "DSSAT_OBS_A_PATH" in os.environ else None
-    a_path_raw = str(a_path_env).strip() if a_path_env is not None else (str(cfg_paths.get("obs_a_path", "")).strip() or str(cfg_paths.get("wha_path", "")).strip())
-    a_path = None
-    if a_path_raw and not str(a_path_raw).strip().lower().startswith("__skip__"):
-        a_path = Path(a_path_raw)
-        if not a_path.is_absolute():
-            a_path = dssat_dir / a_path
-    if a_path is None:
-        suf = live_filex.suffix
-        if suf.upper().endswith("X") and len(suf) >= 2:
-            a_path = live_filex.with_suffix(suf[:-1] + "A")
-        else:
-            a_path = live_filex.with_suffix(".A")
-    if not a_path.exists():
-        yield_code = ""
-        laix_code = ""
-    else:
-        try:
-            header = None
-            for line in a_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-                if line.startswith("@TRNO"):
-                    header = line
-                    break
-            if not header:
-                yield_code = ""
-                laix_code = ""
-            else:
-                cols_u = {c.lstrip("@").strip().upper() for c in header.split()}
-                if yield_code and yield_code not in cols_u:
-                    yield_code = ""
-                if laix_code and laix_code not in cols_u:
-                    laix_code = ""
-        except Exception:
-            yield_code = ""
-            laix_code = ""
-    
-    # In run_model.py, we still use the configured names (or HWAM fallback) to query dssat_io. 
-    # dssat_io's pick_eval_value will handle the HWAM -> CWAM -> PRCM internal fallback.
-    var_codes = [c for c in [yield_code, laix_code] if c]
-    allow_missing_dates = os.environ.get("DSSAT_ALLOW_MISSING_WHT_DATES", "").strip().lower() in {"1", "true", "yes", "y"}
-    if not allow_missing_dates:
-        allow_missing_dates = bool((cfg.get("observations", {}) or {}).get("allow_missing_obs_files", False))
-    try:
-        if has_sh2o:
-            _rewrite_initial_sh2o(base, live_filex, sh2o_by_icbl)
-        if cul_updates:
-            _rewrite_cul_params(cul_path, cultivar_code, cul_updates)
-
-        metrics_by_trt: dict[int, dict[str, float]] = {}
-        for trt in trts:
-            for p in ["Evaluate.OUT", "Summary.OUT", "PlantGro.OUT", "PlantGr2.OUT", "WARNING.OUT"]:
-                _try_unlink(dssat_dir / p)
-            _run_dssat(filex_name, int(trt), dssat_dir, cfg)
-            eval_path = dssat_dir / "Evaluate.OUT"
-            m = _extract_eval_metrics(eval_path, var_codes)
-            summary_path = dssat_dir / "Summary.OUT"
-            if summary_path.exists():
-                try:
-                    m_summary = _extract_table_metrics(summary_path, var_codes)
-                    for k, v in m_summary.items():
-                        if k not in m:
-                            m[k] = v
-                except Exception:
-                    pass
-
-            if int(trt) in wht_dates_by_trt and wht_dates_by_trt[int(trt)]:
-                plantgro_path = dssat_dir / "PlantGro.OUT"
-                t_vars_cfg = metrics_cfg.get("t_vars", None)
-                if isinstance(t_vars_cfg, list) and t_vars_cfg:
-                    t_vars = [str(v).strip().upper() for v in t_vars_cfg if str(v).strip()]
-                else:
-                    t_vars = ["LAID", "LWAD", "SWAD"]
-                try:
-                    ts = _extract_plantgro_vars_at_dates(
-                        plantgro_path, wht_dates_by_trt[int(trt)], t_vars, allow_missing=allow_missing_dates
-                    )
-                except RuntimeError as e:
-                    raise RuntimeError(f"[TRT {int(trt)}] {e}")
-                for d, vals in ts.items():
-                    for k, v in vals.items():
-                        m[f"{str(k).strip().lower()}_d{int(d)}"] = float(v)
-
-            metrics_by_trt[int(trt)] = m
-    finally:
-        live_filex.write_text(live_original, encoding="utf-8")
-        cul_path.write_text(cul_original, encoding="utf-8")
-        if wth_original is not None and wth_path:
-            wth_path.write_text(wth_original, encoding="utf-8")
-        if sol_original is not None and sol_path:
-            sol_path.write_text(sol_original, encoding="utf-8")
-        if not keep_outputs:
-            for p in ["Evaluate.OUT", "Summary.OUT", "PlantGro.OUT", "PlantGr2.OUT", "WARNING.OUT"]:
-                _try_unlink(dssat_dir / p)
-
-    lines: list[str] = []
-    if len(trts) == 1 and not trts_env:
-        t0 = trts[0]
-        m = metrics_by_trt[int(t0)]
-        if yield_code and yield_code.lower() in m:
-            lines.append(f"{yield_code.lower()} {m[yield_code.lower()]:.6f} ")
-        if laix_code and laix_code.lower() in m:
-            lines.append(f"{laix_code.lower()} {m[laix_code.lower()]:.6f} ")
-        out_text = "\n".join(lines) + "\n"
-    else:
-        for trt in trts:
-            m = metrics_by_trt[int(trt)]
-            if yield_code and yield_code.lower() in m:
-                lines.append(f"{yield_code.lower()}_t{int(trt):02d} {m[yield_code.lower()]:.6f} ")
-            if laix_code and laix_code.lower() in m:
-                lines.append(f"{laix_code.lower()}_t{int(trt):02d} {m[laix_code.lower()]:.6f} ")
-            if int(trt) in wht_dates_by_trt and wht_dates_by_trt[int(trt)]:
-                for d in wht_dates_by_trt[int(trt)]:
-                    laid_key = f"laid_d{int(d)}"
-                    if laid_key in m:
-                        lines.append(f"laid_t{int(trt):02d}_d{int(d)} {m[laid_key]:.6f} ")
-                    for extra in ["lwad", "swad"]:
-                        k2 = f"{extra}_d{int(d)}"
-                        if k2 in m:
-                            lines.append(f"{extra}_t{int(trt):02d}_d{int(d)} {m[k2]:.6f} ")
-        out_text = "\n".join(lines) + "\n"
-
+    out_text = build_pest_output_text(
+        metrics_by_trt,
+        prepared.trts,
+        prepared.trts_env,
+        prepared.case_runtime.output.var_codes,
+        prepared.case_runtime.observation.wht_dates_by_trt,
+    )
     (cwd / "pest_out.dat").write_text(out_text, encoding="utf-8")
+    write_run_manifest(
+        cwd,
+        {
+            "results": {
+                "metrics_by_trt": {
+                    str(int(trt)): {str(key): float(value) for key, value in metrics.items()}
+                    for trt, metrics in sorted(metrics_by_trt.items())
+                }
+            },
+            "paths": {"pest_output_path": cwd / "pest_out.dat"},
+        },
+    )
 
 
 if __name__ == "__main__":

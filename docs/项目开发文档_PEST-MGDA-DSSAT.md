@@ -1,10 +1,10 @@
-# PEST-MGDA-DSSAT 项目开发文档
+﻿# PEST-MGDA-DSSAT 项目开发文档
 
 ## 1. 结论：是否可以开始实施
 
 可以开始实施。
 
-依据：在 [mvp_pest_mgda](file:///c:/DSSAT48/Wheat/mvp_pest_mgda) 目录已跑通最小闭环（PEST++ 生成 Jacobian/残差 → MGDA 计算更新 → DSSAT 以更新参数再运行一次），证明关键技术链路、文件接口与命令行执行可行。
+依据：在 [mvp_pest_mgda](file:///d:/Wheat/Wheat/mvp_pest_mgda) 目录已跑通最小闭环（PEST++ 生成 Jacobian/残差 → MGDA 计算更新 → DSSAT 以更新参数再运行一次），证明关键技术链路、文件接口与命令行执行可行。
 
 ## 2. 项目目标与范围
 
@@ -158,10 +158,10 @@
 
 ## 9. 当前代码基线入口
 
-- 入口脚本（闭环）：[run_mvp.ps1](file:///c:/DSSAT48/Wheat/mvp_pest_mgda/scripts/run_mvp.ps1)
-- DSSAT 运行与文件写入： [run_model.py](file:///c:/DSSAT48/Wheat/mvp_pest_mgda/src/run_model.py)
-- PEST 控制文件生成： [build_pest_setup.py](file:///c:/DSSAT48/Wheat/mvp_pest_mgda/src/build_pest_setup.py)
-- MGDA 更新： [mgda_update.py](file:///c:/DSSAT48/Wheat/mvp_pest_mgda/src/mgda_update.py)
+- 入口脚本（闭环）：[run_mvp.ps1](file:///d:/Wheat/Wheat/mvp_pest_mgda/scripts/run_mvp.ps1)
+- DSSAT 运行与文件写入： [run_model.py](file:///d:/Wheat/Wheat/mvp_pest_mgda/src/run_model.py)
+- PEST 控制文件生成： [build_pest_setup.py](file:///d:/Wheat/Wheat/mvp_pest_mgda/src/build_pest_setup.py)
+- MGDA 更新： [mgda_update.py](file:///d:/Wheat/Wheat/mvp_pest_mgda/src/mgda_update.py)
 
 ## 10. 工程实现极致方案（面向可复现、可扩展、可长期维护）
 
@@ -480,6 +480,7 @@
 
 - **鲁棒点**：最小化 `phi_w(valid)` 的 worst-case（跨年/跨处理/跨管理取最大）或 CV 均值。
 - **解释点**：在 Pareto 前沿上提供若干代表性点（例如强调产量/强调水分机理/折中），用于科研解释与外推实验设计。
+
 
 
 

@@ -82,7 +82,7 @@ def objective_function(params_array):
     
     try:
         base_loss = strategy.calculate_loss(valid_sim_y, valid_obs_y, valid_sim_l, valid_obs_l)
-    except:
+    except Exception:
         return 1e9
         
     return base_loss

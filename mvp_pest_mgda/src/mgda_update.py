@@ -4,12 +4,11 @@ import json
 import math
 import os
 import random
-import subprocess
-import sys
 from pathlib import Path
 
 import numpy as np
 import pyemu
+from pest_runner import run_compare_model
 
 
 def _min_norm_two(g1: np.ndarray, g2: np.ndarray) -> tuple[float, np.ndarray]:
@@ -43,23 +42,6 @@ def _read_par_params(path: Path) -> dict[str, float]:
             continue
     return out
 
-
-def _read_kv_out(path: Path) -> dict[str, float]:
-    out: dict[str, float] = {}
-    for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        parts = line.split()
-        if len(parts) < 2:
-            continue
-        try:
-            out[parts[0].strip().lower()] = float(parts[1])
-        except ValueError:
-            continue
-    return out
-
-
 def _bool_env(name: str, default: bool) -> bool:
     val = os.environ.get(name)
     if val is None:
@@ -73,14 +55,9 @@ def _bool_env(name: str, default: bool) -> bool:
 
 
 def _load_project_config(project_root: Path) -> dict:
-    cfg_path = os.environ.get("PROJECT_CONFIG", "").strip()
-    if cfg_path:
-        path = Path(cfg_path)
-    else:
-        path = project_root / "config" / "project.json"
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    from dssat_io import load_project_config
+
+    return load_project_config(project_root, crop=os.environ.get("PROJECT_CROP", ""))
 
 
 def _extract_trt_from_obs_name(name: str) -> int | None:
@@ -123,6 +100,8 @@ def _resolve_split(cfg: dict, trts: list[int]) -> dict[int, str]:
             ratio = float(split_cfg.get("valid_ratio"))
         except Exception:
             ratio = None
+    if ratio is None and not train and not valid and len(all_trts) > 1:
+        ratio = 0.2
 
     if mode == "ratio" and ratio is not None:
         rnd = random.Random(int(split_cfg.get("seed", split_cfg.get("random_seed", 0))))
@@ -248,32 +227,23 @@ def _calc_phi(
 
 
 def _evaluate_phi(
-    work_dir: Path, 
-    pst: pyemu.Pst, 
-    run_model_path: Path, 
+    work_dir: Path,
+    pst: pyemu.Pst,
     params: dict[str, float],
     cfg: dict,
     group_sizes: dict[str, int],
     loss_type: str = "mse",
-    huber_delta: float = 1.0
+    huber_delta: float = 1.0,
 ) -> float:
     eval_params_path = work_dir / "_mgda_eval_params.dat"
     _write_params_dat(eval_params_path, params)
 
-    env = os.environ.copy()
-    env["PARAMS_PATH"] = str(eval_params_path)
-    env["DSSAT_KEEP_OUTPUTS"] = "0"
-    cp = subprocess.run(
-        [sys.executable, str(run_model_path)],
-        cwd=str(work_dir),
-        capture_output=True,
-        text=True,
-        env=env,
+    sim = run_compare_model(
+        work_dir=work_dir,
+        params_path=eval_params_path,
+        keep_outputs=False,
+        failure_label="mgda_update run_model.py",
     )
-    if cp.returncode != 0:
-        raise RuntimeError(f"run_model.py failed: {cp.returncode}\nSTDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}")
-
-    sim = _read_kv_out(work_dir / "pest_out.dat")
     return _calc_phi(pst, sim, cfg, group_sizes, loss_type, huber_delta)
 
 
@@ -561,8 +531,7 @@ def main() -> None:
     p1 = dict(p0)
 
     if safe:
-        run_model_path = Path(__file__).resolve().parents[1] / "src" / "run_model.py"
-        phi0 = _evaluate_phi(cwd, pst, run_model_path, p0, cfg, group_sizes, loss_type, huber_delta)
+        phi0 = _evaluate_phi(cwd, pst, p0, cfg, group_sizes, loss_type, huber_delta)
         phi_tol = float(os.environ.get("MGDA_PHI_TOL", "0.0"))
         max_back = int(os.environ.get("MGDA_MAX_BACKTRACK", "8"))
         accepted = False
@@ -573,7 +542,7 @@ def main() -> None:
             x1 = np.clip(x0 + delta, 0.0, 1.0)
             cand = {p: float(lb[p] + x1[i] * (ub[p] - lb[p])) for i, p in enumerate(par_names)}
             try:
-                phi_c = _evaluate_phi(cwd, pst, run_model_path, cand, cfg, group_sizes, loss_type, huber_delta)
+                phi_c = _evaluate_phi(cwd, pst, cand, cfg, group_sizes, loss_type, huber_delta)
             except Exception:
                 phi_c = float("inf")
             if math.isfinite(phi_c) and phi_c <= phi0 * (1.0 + phi_tol):

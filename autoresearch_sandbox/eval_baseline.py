@@ -1,14 +1,10 @@
+import importlib
 import sys
-import os
 from pathlib import Path
-import numpy as np
-import subprocess
 
-# Reuse paths and settings from eval.py
 SANDBOX_DIR = Path(r"c:\DSSAT48\Wheat\autoresearch_sandbox")
 sys.path.append(str(SANDBOX_DIR))
-
-import eval
+eval = importlib.import_module("eval")
 
 def run_default_baseline():
     print("Evaluating Official DSSAT Default Parameters...")
