@@ -12,13 +12,25 @@ SANDBOX_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SANDBOX_DIR.parent
 MVP_ROOT = PROJECT_ROOT / "mvp_pest_mgda"
 
-# Define matrix mapping
-W_MAP = {"W0": "w0_raw_identity", "W4": "w4_min_max_equal", "W6": "w6_log_transformation", "W8": "w8_dssat_group_max"}
-# Note: As per Phase 1 guide, 'O5' (MGDA) is excluded from Phase 1. 
-# O1 represents the standard local optimization (Least Squares), and O2 represents ensemble methodologies requiring multiples reps (PESTPP-IES).
-O_MAP = {"O1": "o1_least_squares", "O2": "o2_pestpp_ies"}
-S_MAP = {"S1": "s1_naive_joint", "S2": "s2_sequential_phase"}
-G_MAP = {"G1": "g1_flat_all_in_one", "G3": "g3_dssat_extended"}
+# Define matrix mapping (strictly adhering to 02_Terminology_and_Notation.md Table 4.2)
+W_MAP = {
+    "W0": "w0_raw_identity",       # Raw-Identity
+    "W4": "w4_min_max_equal",      # Min-Max Equal
+    "W6": "w6_log_transformation", # Log-Transformation
+    "W8": "w8_dssat_group_max"     # DSSAT-PEST Group-Max Scaling
+}
+O_MAP = {
+    "O1": "o6_pestpp_glm",         # pestpp-glm (Deterministic, requires fewer reps)
+    "O2": "o2_pestpp_ies"          # pestpp-ies (Ensemble smoothed, requires multiple reps)
+}
+S_MAP = {
+    "S1": "s1_naive_joint",        # Naive Joint
+    "S2": "s2_sequential_phase"    # Sequential Phase
+}
+G_MAP = {
+    "G1": "g1_flat_all_in_one",    # Flat-All-in-One
+    "G3": "g3_dssat_extended"      # DSSAT-PEST Extended Grouping
+}
 
 # Define Batches as per rules
 BATCH_A = [
