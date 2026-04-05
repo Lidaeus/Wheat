@@ -14,8 +14,9 @@ MVP_ROOT = PROJECT_ROOT / "mvp_pest_mgda"
 
 # Define matrix mapping
 W_MAP = {"W0": "w0_raw_identity", "W4": "w4_min_max_equal", "W6": "w6_log_transformation", "W8": "w8_dssat_group_max"}
-# Note: Phase 1 guide says "O1 (MGDA Hybrid)" which could correspond to mgda (o5). "O2" (Global+Local) could correspond to o3 (anneal_nm).
-O_MAP = {"O1": "o5_mgda", "O2": "o3_anneal_nm"}
+# Note: As per Phase 1 guide, 'O5' (MGDA) is excluded from Phase 1. 
+# O1 represents the standard local optimization (Least Squares), and O2 represents ensemble methodologies requiring multiples reps (PESTPP-IES).
+O_MAP = {"O1": "o1_least_squares", "O2": "o2_pestpp_ies"}
 S_MAP = {"S1": "s1_naive_joint", "S2": "s2_sequential_phase"}
 G_MAP = {"G1": "g1_flat_all_in_one", "G3": "g3_dssat_extended"}
 
