@@ -952,7 +952,9 @@ def validate_experiment_configuration():
     known_weight_modes = {
         "w0_raw_identity",
         "w1_inverse_variance",
+        "w4_min_max_equal",
         "w5_mean_normalized",
+        "w6_log_transformation",
         "w7_equal_contribution",
         "w8_dssat_group_max",
         "w9_pareto_no_preweight",
@@ -965,6 +967,7 @@ def validate_experiment_configuration():
         "o3_powell",
         "o4_nsga2",
         "o5_mgda",
+        "o6_pestpp_glm",
         "default_dssat",
     }
     known_sequences = {"s1_naive_joint", "s2_sequential_phase", "s3_wls_joint"}
@@ -1963,7 +1966,6 @@ def main():
                     elif r.split == "valid":
                         yield_val_nrmse, yield_val_bias = r.nrmse, r.bias
                         
-        import time
         lock_path = SANDBOX_DIR / ".phase1_export.lock"
         for _ in range(3000): # wait up to 5 mins
             try:
@@ -2040,7 +2042,6 @@ def main():
                         ])
         finally:
             try:
-                import os
                 os.unlink(lock_path)
             except OSError:
                 pass
