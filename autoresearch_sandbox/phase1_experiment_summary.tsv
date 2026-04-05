@@ -1,0 +1,5 @@
+run_id	combo_key	executed_at	plan	weight	engine	budget	sequence	grouping	status	score	delta_vs_b0	delta_vs_b1	delta_vs_negative_ref	better_than_b0	train_mean_nrmse	valid_mean_nrmse	all_mean_nrmse	train_yield_nrmse	train_yield_bias	valid_yield_nrmse	valid_yield_bias	duration_sec	validation_enabled	train_trts	valid_trts	workspace_dir
+W0_O1_S1_G1_Wheat_0_4e8ae1	W0_O1_S1_G1	2026-04-05T22:09:17.653704	BatchA	W0	O1	standard	S1	G1	success	0	0	0	0	False	0	0	0	0	0	0	0	2.512490749359131	False			
+W0_O1_S1_G3_Wheat_0_3b00ab	W0_O1_S1_G3	2026-04-05T22:09:18.415964	BatchA	W0	O1	standard	S1	G3	success	0	0	0	0	False	0	0	0	0	0	0	0	0.7610361576080322	False			
+W4_O1_S1_G1_Wheat_0_51c182	W4_O1_S1_G1	2026-04-05T22:09:19.113572	BatchA	W4	O1	standard	S1	G1	success	0	0	0	0	False	0	0	0	0	0	0	0	0.6965665817260742	False			
+W4_O1_S1_G3_Wheat_0_f5f89d	W4_O1_S1_G3	2026-04-05T22:09:19.840232	BatchA	W4	O1	standard	S1	G3	success	0	0	0	0	False	0	0	0	0	0	0	0	0.7266600131988525	False			
