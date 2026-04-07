@@ -346,6 +346,7 @@ PROGRESS_EVERY = max(1, int(os.environ.get("AR_PROGRESS_EVERY", "1")))
 EVAL_RUN_COUNTER = 0
 CURRENT_STAGE_CONTEXT = {"index": 0, "total": 0, "name": "", "metrics": tuple(), "active": tuple()}
 OPTIMIZATION_STARTED_AT = time.time()
+RUN_MODEL_STATS_PATH = RUNTIME_DIR / "run_model_stats.jsonl"
 
 
 def _progress_elapsed_seconds() -> float:
@@ -363,6 +364,28 @@ def progress_log(event: str, **fields: object) -> None:
             normalized_value = ",".join(str(item) for item in normalized_value)
         pieces.append(f"{key}={normalized_value}")
     print(" ".join(pieces))
+
+
+def summarize_run_model_stats(stats_path: Path) -> dict[str, float]:
+    summary = {
+        "run_model_invocations": 0.0,
+        "dssat_treatment_calls": 0.0,
+        "dssat_wall_sec": 0.0,
+    }
+    if not stats_path.exists():
+        return summary
+    for line in stats_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        raw = line.strip()
+        if not raw:
+            continue
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        summary["run_model_invocations"] += 1.0
+        summary["dssat_treatment_calls"] += float(payload.get("dssat_calls", payload.get("treatment_calls", 0.0)) or 0.0)
+        summary["dssat_wall_sec"] += float(payload.get("duration_sec", 0.0) or 0.0)
+    return summary
 
 
 def set_stage_context(stage: dict, stage_index: int, stage_total: int) -> None:
@@ -704,8 +727,8 @@ def observation_metric_candidates(cfg):
         "hwum": ["HWUM"],
         "cwam": ["CWAM", "CWAD"],
         "laix": [laix_code, "LAIX", "LAID"],
-        "adap": ["ADAT"],
-        "mdap": ["MDAT"],
+        "adap": ["ADAP", "ADAT"],
+        "mdap": ["MDAP", "MDAT"],
     }
 
 
@@ -888,6 +911,8 @@ def resolve_split(cfg, trts):
     split_cfg = cfg.get("split", {})
     mode = str(split_cfg.get("mode", "trt")).strip().lower()
     all_trts = [int(t) for t in trts]
+    if str(os.environ.get("AR_FORCE_TRAIN_ONLY", "0")).strip().lower() in {"1", "true", "yes", "y", "on"}:
+        return {int(trt): "train" for trt in all_trts}
     train = {int(t) for t in (split_cfg.get("train_trts") or []) if str(t).strip()}
     valid = {int(t) for t in (split_cfg.get("valid_trts") or []) if str(t).strip()}
 
@@ -1271,6 +1296,7 @@ def run_dssat_and_get_simulated(params_array):
         trts=SCENARIO_TRTS,
         keep_outputs=False,
         base_env=os.environ,
+        extra_env={"DSSAT_RUN_STATS_PATH": str(RUN_MODEL_STATS_PATH)},
         project_config_path=PROJECT_CONFIG_PATH,
         case_dir=CASE_DIR,
         cul_path=resolve_cultivar_path(),
@@ -1384,6 +1410,7 @@ def build_pest_stage_env(stage, budget_profile, optimizer_mode):
             "PEST_ACTIVE_PARAMS": ",".join(active_stage_param_names(stage)),
             "PEST_ACTIVE_METRICS": ",".join(stage["metrics"]),
             "PEST_OBS_WEIGHT_MODE": WEIGHT_MODE,
+            "DSSAT_RUN_STATS_PATH": str(RUN_MODEL_STATS_PATH),
             "PEST_NOPTMAX": str(
                 int(
                     os.environ.get(
@@ -1433,7 +1460,27 @@ def run_pestpp_glm_stage(start_params, stage, budget_profile, wls_weights=None):
     progress_log("pest_setup_done", optimizer="o6_pestpp_glm", stage=CURRENT_STAGE_CONTEXT["name"])
 
     progress_log("pest_solver_start", optimizer="o6_pestpp_glm", stage=CURRENT_STAGE_CONTEXT["name"])
-    run_pestpp_executable("pestpp-glm.exe", env, pst_filename="ksas_mvp.pst", failure_label="pestpp-glm execution")
+    try:
+        run_pestpp_executable("pestpp-glm.exe", env, pst_filename="ksas_mvp.pst", failure_label="pestpp-glm execution")
+    except Exception as exc:
+        message = str(exc)
+        if "jacobian matrix has no non-zeros" in message or "all parameters at/near bounds" in message:
+            progress_log(
+                "pest_solver_fallback_to_stage_loss",
+                optimizer="o6_pestpp_glm",
+                stage=CURRENT_STAGE_CONTEXT["name"],
+                reason="zero_jacobian_or_bound_lock",
+            )
+            metric_weights = stage_metric_weights(start_params, stage, wls_weights=wls_weights)
+            fallback_loss = objective_function(
+                start_params,
+                metrics=stage["metrics"],
+                split_name="train",
+                metric_weights=metric_weights,
+                normalize=normalize_residuals_for_weight_mode() and stage["mode"] != "wls",
+            )
+            return np.array(start_params, dtype=float), float(fallback_loss), False
+        raise
     progress_log("pest_solver_done", optimizer="o6_pestpp_glm", stage=CURRENT_STAGE_CONTEXT["name"])
 
     best_params, best_phi = parse_best_glm_result(start_params)
@@ -1928,10 +1975,15 @@ def main():
         run_id = os.environ.get("AR_RUN_ID", "local")
         combo_key = os.environ.get("AR_COMBO_KEY", "combo")
         plan = os.environ.get("AR_PLAN", "plan")
+        output_root = Path(os.environ.get("AR_PHASE1_OUTPUT_DIR", "").strip()).resolve() if os.environ.get("AR_PHASE1_OUTPUT_DIR", "").strip() else SANDBOX_DIR
+        output_root.mkdir(parents=True, exist_ok=True)
         
         import sys
-        from pathlib import Path
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        mvp_root = str(os.environ.get("AR_MVP_ROOT", "")).strip()
+        if mvp_root:
+            sys.path.insert(0, str(Path(mvp_root).resolve().parent))
+        else:
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
         from mvp_pest_mgda.src.calibration_core.result_schema import (
             build_experiment_export_context,
             build_aggregate_metric_export_rows,
@@ -1965,8 +2017,9 @@ def main():
                         yield_tr_nrmse, yield_tr_bias = r.nrmse, r.bias
                     elif r.split == "valid":
                         yield_val_nrmse, yield_val_bias = r.nrmse, r.bias
+        run_model_stats = summarize_run_model_stats(RUN_MODEL_STATS_PATH)
                         
-        lock_path = SANDBOX_DIR / ".phase1_export.lock"
+        lock_path = output_root / ".phase1_export.lock"
         for _ in range(3000): # wait up to 5 mins
             try:
                 fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -1975,7 +2028,7 @@ def main():
             except FileExistsError:
                 time.sleep(0.1)
         try:
-            summary_path = SANDBOX_DIR / "phase1_experiment_summary.tsv"
+            summary_path = output_root / "phase1_experiment_summary.tsv"
             if summary_path.exists():
                 with open(summary_path, "a", newline="", encoding="utf-8") as f:
                     writer = csv.writer(f, delimiter="\t")
@@ -1984,11 +2037,12 @@ def main():
                         CALIBRATION_SEQUENCE, GROUPING_MODE, "success" if res_success else "failed", final_score, 0, 0, 0,
                         "True" if final_score < 999.0 else "False", train_score, valid_score, all_score,
                         yield_tr_nrmse, yield_tr_bias, yield_val_nrmse, yield_val_bias,
-                        time.time() - OPTIMIZATION_STARTED_AT, str(bool(VALID_TRTS)), str(TRAIN_TRTS), str(VALID_TRTS), str(CASE_DIR)
+                        time.time() - OPTIMIZATION_STARTED_AT, str(bool(VALID_TRTS)), str(TRAIN_TRTS), str(VALID_TRTS), str(CASE_DIR),
+                        EVAL_RUN_COUNTER, int(run_model_stats["run_model_invocations"]), int(run_model_stats["dssat_treatment_calls"]), run_model_stats["dssat_wall_sec"]
                     ])
                     
             if result_schema_view is not None:
-                agg_path = SANDBOX_DIR / "phase1_aggregate_metrics.tsv"
+                agg_path = output_root / "phase1_aggregate_metrics.tsv"
                 if agg_path.exists():
                     agg_rows = build_aggregate_metric_export_rows(context, result_schema_view.aggregate_metrics)
                     with open(agg_path, "a", newline="", encoding="utf-8") as f:
@@ -1996,7 +2050,7 @@ def main():
                         for row in agg_rows:
                             writer.writerow(build_aggregate_metric_export_value_map(row))
                             
-                trt_path = SANDBOX_DIR / "phase1_treatment_metrics.tsv"
+                trt_path = output_root / "phase1_treatment_metrics.tsv"
                 if trt_path.exists():
                     comp_records = build_treatment_comparison_records(
                         result_schema_view,
@@ -2010,7 +2064,7 @@ def main():
                         for row in trt_rows:
                             writer.writerow(build_treatment_metric_export_value_map(row))
 
-                fig_path = SANDBOX_DIR / "phase1_figure_ready.tsv"
+                fig_path = output_root / "phase1_figure_ready.tsv"
                 if fig_path.exists():
                     with open(fig_path, "a", newline="", encoding="utf-8") as f:
                         writer = csv.writer(f, delimiter="\t")
@@ -2027,15 +2081,17 @@ def main():
                                 agg_row.count, agg_row.nrmse, agg_row.bias
                             ])
                             
-            param_path = SANDBOX_DIR / "phase1_parameters.tsv"
+            param_path = output_root / "phase1_parameters.tsv"
             if param_path.exists():
                 with open(param_path, "a", newline="", encoding="utf-8") as f:
                     writer = csv.writer(f, delimiter="\t")
+                    b0_reference_params = np.array(INITIAL_GUESS, dtype=float)
                     for i, (name, val) in enumerate(zip(PARAM_NAMES, best_params)):
                         lb, ub = BOUNDS[i]
                         is_lb = (val - lb) <= 1e-4
                         is_ub = (ub - val) <= 1e-4
-                        normalized = (val - lb) / (ub - lb + 1e-8)
+                        baseline_value = float(b0_reference_params[i]) if i < len(b0_reference_params) else float(val)
+                        normalized = abs(float(val) - baseline_value) / (ub - lb + 1e-8)
                         writer.writerow([
                             run_id, PROJECT_CONFIG.get("crop_family", ""), combo_key, name, 
                             val, lb, ub, str(is_lb), str(is_ub), normalized

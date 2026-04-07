@@ -2,16 +2,16 @@
   "crop_family": "soybean",
   "paths": {
     "dssat_case_dir": "C:\\DSSAT48\\Soybean",
-    "wha_path": "C:\\DSSAT48\\Soybean\\UFGA8201.SBA",
-    "wht_path": "C:\\DSSAT48\\Soybean\\UFGA8201.SBT",
-    "obs_a_path": "C:\\DSSAT48\\Soybean\\UFGA8201.SBA",
-    "obs_t_path": "C:\\DSSAT48\\Soybean\\UFGA8201.SBT",
+    "wha_path": "C:\\DSSAT48\\Soybean\\UFGA8101.SBA",
+    "wht_path": "C:\\DSSAT48\\Soybean\\UFGA8101.SBT",
+    "obs_a_path": "C:\\DSSAT48\\Soybean\\UFGA8101.SBA",
+    "obs_t_path": "C:\\DSSAT48\\Soybean\\UFGA8101.SBT",
     "cul_path": "C:\\DSSAT48\\Genotype\\SBGRO048.CUL",
     "dssat_exe": "C:\\DSSAT48\\DSCSM048.EXE"
   },
   "scenario": {
-    "filex": "UFGA8201.SBX",
-    "base_filex": "UFGA8201_base.SBX",
+    "filex": "UFGA8101.SBX",
+    "base_filex": "UFGA8101.SBX",
     "trts": [1, 2, 3]
   },
   "params": {

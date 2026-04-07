@@ -2,17 +2,17 @@
   "crop_family": "cotton",
   "paths": {
     "dssat_case_dir": "C:\\DSSAT48\\Cotton",
-    "wha_path": "C:\\DSSAT48\\Cotton\\UFGA8201.COA",
-    "wht_path": "C:\\DSSAT48\\Cotton\\UFGA8201.COT",
-    "obs_a_path": "C:\\DSSAT48\\Cotton\\UFGA8201.COA",
-    "obs_t_path": "C:\\DSSAT48\\Cotton\\UFGA8201.COT",
+    "wha_path": "C:\\DSSAT48\\Cotton\\AZMC8901.COA",
+    "wht_path": "C:\\DSSAT48\\Cotton\\AZMC8901.COT",
+    "obs_a_path": "C:\\DSSAT48\\Cotton\\AZMC8901.COA",
+    "obs_t_path": "C:\\DSSAT48\\Cotton\\AZMC8901.COT",
     "cul_path": "C:\\DSSAT48\\Genotype\\COGRO048.CUL",
     "dssat_exe": "C:\\DSSAT48\\DSCSM048.EXE"
   },
   "scenario": {
-    "filex": "UFGA8201.COX",
-    "base_filex": "UFGA8201_base.COX",
-    "trts": [1, 2, 3]
+    "filex": "AZMC8901.COX",
+    "base_filex": "AZMC8901.COX",
+    "trts": [1, 2]
   },
   "params": {
     "bounds": {

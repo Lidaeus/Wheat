@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import json
 import os
 import random
 import re
@@ -54,6 +55,25 @@ from dssat_io import (
 
 
 OUTPUT_FILES = ["Evaluate.OUT", "Summary.OUT", "PlantGro.OUT", "PlantGr2.OUT", "WARNING.OUT"]
+
+
+def append_run_stats(*, cwd: Path, trts: list[int], treatment_calls: int, duration_sec: float, status: str) -> None:
+    stats_path_raw = str(os.environ.get("DSSAT_RUN_STATS_PATH", "")).strip()
+    if not stats_path_raw:
+        return
+    stats_path = Path(stats_path_raw).resolve()
+    stats_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "cwd": str(cwd),
+        "status": str(status),
+        "trt_count_requested": len(trts),
+        "treatment_calls": int(treatment_calls),
+        "dssat_calls": int(treatment_calls),
+        "duration_sec": float(duration_sec),
+    }
+    with open(stats_path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
 def _apply_runtime_request(runtime_request_path: str) -> Path | None:
@@ -631,7 +651,7 @@ def execute_case(
     case_runtime: CaseRuntime,
     file_state: RuntimeFileState,
     keep_outputs: bool,
-) -> MetricsByTreatment:
+) -> tuple[MetricsByTreatment, int]:
     if case_runtime.input_plan.wth_updates and case_runtime.input_plan.wth_path is not None:
         rewrite_wth_daily(case_runtime.input_plan.wth_path, case_runtime.input_plan.wth_updates)
     if case_runtime.input_plan.sol_updates and case_runtime.input_plan.sol_path is not None:
@@ -646,9 +666,11 @@ def execute_case(
             _rewrite_cul_params(cul_path, cultivar_code, case_runtime.input_plan.cul_updates)
 
         metrics_by_trt: MetricsByTreatment = {}
+        treatment_calls = 0
         for trt in trts:
+            treatment_calls += 1
             metrics_by_trt[int(trt)] = execute_treatment(int(trt), filex_name, dssat_dir, cfg, case_runtime)
-        return metrics_by_trt
+        return metrics_by_trt, treatment_calls
     finally:
         _restore_runtime_files(file_state)
         if not keep_outputs:
@@ -758,19 +780,38 @@ def main() -> None:
     cwd = Path.cwd()
     write_run_manifest(cwd, _build_runtime_manifest_payload(prepared, cwd))
     write_contract_report(cwd, _build_contract_report(prepared, cwd))
-    metrics_by_trt = execute_case(
-        prepared.base,
-        prepared.live_filex,
-        prepared.cul_path,
-        prepared.cultivar_code,
-        prepared.filex_name,
-        prepared.dssat_dir,
-        prepared.cfg,
-        prepared.trts,
-        prepared.case_runtime,
-        prepared.file_state,
-        prepared.keep_outputs,
-    )
+    started_at = time.time()
+    treatment_calls = 0
+    try:
+        metrics_by_trt, treatment_calls = execute_case(
+            prepared.base,
+            prepared.live_filex,
+            prepared.cul_path,
+            prepared.cultivar_code,
+            prepared.filex_name,
+            prepared.dssat_dir,
+            prepared.cfg,
+            prepared.trts,
+            prepared.case_runtime,
+            prepared.file_state,
+            prepared.keep_outputs,
+        )
+        append_run_stats(
+            cwd=cwd,
+            trts=prepared.trts,
+            treatment_calls=treatment_calls,
+            duration_sec=time.time() - started_at,
+            status="success",
+        )
+    except Exception:
+        append_run_stats(
+            cwd=cwd,
+            trts=prepared.trts,
+            treatment_calls=treatment_calls,
+            duration_sec=time.time() - started_at,
+            status="failed",
+        )
+        raise
 
     out_text = build_pest_output_text(
         metrics_by_trt,

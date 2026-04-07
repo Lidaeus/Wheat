@@ -6,6 +6,7 @@ import math
 import os
 import random
 import shutil
+import sys
 import time
 from pathlib import Path
 
@@ -857,11 +858,18 @@ def _extract_measured_from_wht(
         if not recs:
             continue
         recs_sorted = sorted(recs, key=lambda t: int(t[0]))
-        dates_by_trt[int(trt)] = [int(d) for d, _, _ in recs_sorted]
+        aggregated_by_date: dict[int, list[tuple[float, float | None]]] = {}
         for d, laid, swad in recs_sorted:
-            out[f"laid_t{int(trt):02d}_d{int(d)}"] = float(laid)
-            if second and swad is not None:
-                out[f"{second}_t{int(trt):02d}_d{int(d)}"] = float(swad)
+            aggregated_by_date.setdefault(int(d), []).append((float(laid), None if swad is None else float(swad)))
+        unique_dates = sorted(aggregated_by_date.keys())
+        dates_by_trt[int(trt)] = unique_dates
+        for d in unique_dates:
+            values = aggregated_by_date[int(d)]
+            laid_values = [laid for laid, _ in values]
+            second_values = [float(v) for _, v in values if v is not None]
+            out[f"laid_t{int(trt):02d}_d{int(d)}"] = float(sum(laid_values) / len(laid_values))
+            if second and second_values:
+                out[f"{second}_t{int(trt):02d}_d{int(d)}"] = float(sum(second_values) / len(second_values))
 
     return out, dates_by_trt, second
 
@@ -1421,9 +1429,10 @@ def main() -> None:
         laix_prefix=laix_prefix,
         observation_count=len(meas),
     )
+    run_model_python = str(os.environ.get("PEST_RUN_MODEL_PYTHON", "")).strip() or sys.executable
     pst = build_pst(
         pyemu_module=pyemu,
-        model_command=f'python "{run_model_path}"',
+        model_command=f'"{run_model_python}" "{run_model_path}"',
         noptmax=int(os.environ.get("PEST_NOPTMAX", "10")),
         pst_bounds=pst_bounds,
         params=params,

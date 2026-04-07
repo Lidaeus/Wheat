@@ -75,8 +75,9 @@ def apply_parameter_configuration(
         pst.parameter_data.loc[param_name, "parlbnd"] = float(lb)
         pst.parameter_data.loc[param_name, "parubnd"] = float(ub)
         pst.parameter_data.loc[param_name, "pargp"] = str(group_name)
-        pst.parameter_data.loc[param_name, "partrans"] = "none"
-        pst.parameter_data.loc[param_name, "parval1"] = float(params.get(param_name, pst.parameter_data.loc[param_name, "parval1"]))
+        fixed_param = abs(float(ub) - float(lb)) <= 1.0e-12
+        pst.parameter_data.loc[param_name, "partrans"] = "fixed" if fixed_param else "none"
+        pst.parameter_data.loc[param_name, "parval1"] = float(lb if fixed_param else params.get(param_name, pst.parameter_data.loc[param_name, "parval1"]))
     if active_params:
         active = {str(name).strip().lower() for name in active_params}
         for pname in pst.parameter_data.index.astype(str).tolist():

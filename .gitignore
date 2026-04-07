@@ -47,6 +47,10 @@ _runtime_probe/
 local_dssat/
 autoresearch_sandbox/artifacts/
 autoresearch_sandbox/runs/
+/autoresearch_sandbox/phase1_runs/
+/autoresearch_sandbox/phase1_runs/**
+/autoresearch_sandbox/*_runs/
+/autoresearch_sandbox/workspaces/
 autoresearch_sandbox/dssat_case/
 autoresearch_sandbox/_run_eval_mode_matrix_tmp.py
 autoresearch_sandbox/_run_eval_mode_matrix_tmp.tsv
