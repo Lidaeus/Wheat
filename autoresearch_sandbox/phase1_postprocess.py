@@ -8,7 +8,7 @@ from pathlib import Path
 
 def safe_float(value: str | None, default: float = 999.0) -> float:
     try:
-        return float(value) if value not in ("", None) else default
+        return float(str(value)) if value not in ("", None) else default
     except (TypeError, ValueError):
         return default
 

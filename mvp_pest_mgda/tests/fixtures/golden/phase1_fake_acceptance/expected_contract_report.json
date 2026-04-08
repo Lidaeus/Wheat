@@ -1,0 +1,59 @@
+{
+  "run_id": "W0_O1_S1_G1_wheat_rep0_abcdef",
+  "status": "success",
+  "crop": "wheat",
+  "requested": {
+    "weight": "w0_raw_identity",
+    "engine": "o6_pestpp_glm",
+    "sequence": "s1_naive_joint",
+    "grouping": "g1_flat_all_in_one"
+  },
+  "resolved": {
+    "weight": "w0_raw_identity",
+    "engine": "o6_pestpp_glm",
+    "sequence": "s1_naive_joint",
+    "grouping": "g1_flat_all_in_one"
+  },
+  "paths": {
+    "runtime_dir": "__WORKSPACE__",
+    "case_dir": "__CASE_DIR__"
+  },
+  "protocol": {
+    "active_groups": [
+      "obs_yield"
+    ],
+    "primary_metric": "hwam"
+  },
+  "issues": [
+    {
+      "code": "weight_fallback",
+      "severity": "warning",
+      "details": {
+        "group": "obs_yield",
+        "reason": "variance_unavailable_used_sigma"
+      }
+    }
+  ],
+  "weight_fallbacks": [
+    {
+      "group": "obs_yield",
+      "reason": "variance_unavailable_used_sigma",
+      "applied_weight": 0.5
+    }
+  ],
+  "zero_weight_observations": [
+    {
+      "obs_name": "laix_t01",
+      "group": "obs_canopy",
+      "reason": "inactive_metric",
+      "trt": 1
+    }
+  ],
+  "summary": {
+    "active_groups": [
+      "obs_yield"
+    ],
+    "fallback_count": 1,
+    "zero_weight_count": 1
+  }
+}

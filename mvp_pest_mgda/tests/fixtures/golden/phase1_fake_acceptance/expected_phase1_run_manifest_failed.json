@@ -1,0 +1,25 @@
+{
+  "created_at": "__TIMESTAMP__",
+  "batch": "BatchD",
+  "budget": "standard",
+  "workers": 1,
+  "repetitions": 1,
+  "crops": [
+    "Wheat"
+  ],
+  "combo_keys": [
+    "W4_O2_S2_G3",
+    "W8_O1_S2_G3"
+  ],
+  "train_only": true,
+  "job_count": 2,
+  "skipped_crops": {},
+  "failure_count": 1,
+  "failures": [
+    {
+      "run_id": "W4_O2_S2_G3_wheat_rep0_w4fail",
+      "status": "failed",
+      "returncode": 2
+    }
+  ]
+}

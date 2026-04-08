@@ -26,8 +26,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
+    from calibration_core.batch_models import SchedulerConfig as SchedulerConfigType
     from calibration_core.batch_models import WorkerSandbox as WorkerSandboxModel
     from calibration_core.task_store import TaskStore as TaskStoreModel
+else:
+    SchedulerConfigType = Any
 
 
 CALIBRATION_SRC = (Path(__file__).resolve().parents[1] / "mvp_pest_mgda" / "src").resolve()
@@ -1387,7 +1390,7 @@ def execute_matrix_jobs_with_worker_pool(
     batch_root_override: Path | None = None,
     batch_id_override: str = "",
     resume: bool = False,
-    scheduler_config_override: SchedulerConfig | None = None,
+    scheduler_config_override: SchedulerConfigType | None = None,
 ) -> tuple[list[MatrixResult], Path, str]:
     batch_id = batch_id_override.strip() or build_matrix_batch_id(plan)
     batch_root = Path(batch_root_override).resolve() if batch_root_override is not None else (PARALLEL_WORKERS_DIR / batch_id)
@@ -1756,7 +1759,7 @@ def resolve_scheduler_config(
     *,
     max_workers: int | None = None,
     retry_limit: int | None = None,
-) -> tuple[SchedulerConfig, str]:
+) -> tuple[SchedulerConfigType, str]:
     project_cfg = cfg if cfg is not None else load_project_config()
     scheduler_payload_raw = project_cfg.get("scheduler", {})
     scheduler_payload = scheduler_payload_raw if isinstance(scheduler_payload_raw, dict) else {}
@@ -2658,7 +2661,7 @@ def load_matrix_result_from_task_dir(
     stdout = stdout_path.read_text(encoding="utf-8", errors="ignore") if stdout_path.exists() else ""
     score_value = result_payload.get("score")
     try:
-        score = float(score_value)
+        score = float(str(score_value))
     except (TypeError, ValueError):
         score = extract_score(stdout)
     result = build_matrix_result(

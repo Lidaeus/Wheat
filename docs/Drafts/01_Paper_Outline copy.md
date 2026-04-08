@@ -6,7 +6,7 @@
 
 全文主线固定为：
 
-**在五作物 DSSAT 遗传参数率定中，将协议拆解为 `W × O × S × G` 四个设计轴，并进一步考察：`S × G` 是否比单独更换 `O` 更能改善验证表现与参数合理性，以及 `W × O` 交互是否会改变对优化器优劣的判断。**
+**在五作物 DSSAT 遗传参数率定中，将协议拆解为 `W × O × S × G` 四个设计轴，并进一步考察：`S × G` 是否比单独更换 `O` 更能改善验证表现、降低等效性并提高参数可辨识性，以及 `W × O` 交互是否会改变对优化器优劣的判断。**
 
 其中：
 
@@ -100,6 +100,7 @@
    - 将率定问题组织为 `W × O × S × G`
    - 将 `W × G` 明确为损失构造层
    - 将 `S × O` 明确为求解执行层
+   - 将 equifinality 与 identifiability 量化指标并入主证据链
    - 重新定位 `W8`、`NSGA-II` 与 `MGDA` 的角色边界
 
 ### 6.2 材料与方法
@@ -166,9 +167,18 @@
 
 - Validation error
 - Negative optimization rate
+- Equifinality and identifiability metrics
 - Parameter plausibility
 - Error balance
 - Engineering cost
+
+其中 `Equifinality and identifiability metrics` 建议明确包含：
+
+- Jacobian / 灵敏度矩阵奇异值谱
+- 参数后验相关矩阵与高相关参数对占比
+- 行为参数集体积、`log det(cov)` 与 PCA 形状
+- 边界贴附率
+- 同等好参数组的过程轨迹离散度
 
 ### 6.3 结果
 
@@ -203,12 +213,19 @@
 - 是否出现整体劣于 `B0`
 - 是否存在明显参数漂移或边界吸附
 
-#### 6.3.6 Scale Sensitivity of Selected Protocols
+#### 6.3.6 Equifinality Reduction and Identifiability Gain
+
+- `S1` 与 `S2` 的 Jacobian 谱是否显示不同程度的退化
+- `S1` 与 `S2` 的行为参数集是否呈现峡谷状与团块状差异
+- 参数后验相关结构是否在 `S2` 下收缩
+- 同等好参数组的过程轨迹是否在 `S2` 下更一致
+
+#### 6.3.7 Scale Sensitivity of Selected Protocols
 
 - 预算扩容是否改变代表性协议的表现
 - 哪些协议适合作为低预算默认方案
 
-#### 6.3.7 Initialization Sensitivity and Hybrid Search Gain
+#### 6.3.8 Initialization Sensitivity and Hybrid Search Gain
 
 - 哪些协议对初值敏感
 - 多启动与全局-局部混合是否提供可复现增益
@@ -224,6 +241,7 @@
    - `O` 的表现依赖损失构造与顺序结构
 3. **为什么 `S × G` 仍然是主主线**
    - 它们更直接影响参数可辨识性与代偿路径
+   - 这一判断必须由参数空间证据而不仅是误差证据支撑
 4. **为什么 `W × O` 必须被保留为主问题之一**
    - 优化器优劣并非脱离权重环境而成立
 5. **为什么预算与初始化必须分层**
@@ -249,8 +267,12 @@
 - Figure 4：Phase 0 → Phase 1.6 执行路线图
 - Figure 5：Phase 1 核心筛选结果图
 - Figure 6：`W × O` 交互对比图
-- Figure 7：预算敏感性图
-- Figure 8：初始化敏感性或混合搜索收益图
+- Figure 7：`S1` vs `S2` 的 Jacobian 奇异值谱图
+- Figure 8：行为参数云 PCA 投影图
+- Figure 9：参数后验相关热图
+- Figure 10：同等好参数组的过程轨迹包络图
+- Figure 11：预算敏感性图
+- Figure 12：初始化敏感性或混合搜索收益图
 
 ### 7.2 必要表格
 
@@ -261,7 +283,8 @@
 - Table 5：Phase 0 执行记录表
 - Table 6：Phase 1 核心结果汇总表
 - Table 7：受控 `W × O` 交互结果表
-- Table 8：预算与初始化稳健性结果表
+- Table 8：Equifinality 与 identifiability 汇总表
+- Table 9：预算与初始化稳健性结果表
 
 ## 8. 写作推进建议
 
@@ -282,6 +305,7 @@
 
 - `G3` 是否优于 `G1`
 - `S2` 是否优于 `S1`
+- `S2` 是否在参数空间证据上优于 `S1`
 - `W8` 是否站得住
 - `O1/O2` 的受控比较
 - `W × O` 是否存在显著交互

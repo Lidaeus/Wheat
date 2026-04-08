@@ -2195,10 +2195,11 @@ def main():
                 if fig_path.exists():
                     with open(fig_path, "a", newline="", encoding="utf-8") as f:
                         writer = csv.writer(f, delimiter="\t")
-                        agg_dict = { (r.split, r.metric): r for r in agg_rows }
+                        agg_dict = {(r.split, r.metric): r for r in agg_rows}
                         for row in trt_rows:
                             agg_row = agg_dict.get((row.split, row.metric))
-                            if not agg_row: continue
+                            if not agg_row:
+                                continue
                             writer.writerow([
                                 run_id, "1", combo_key, plan, WEIGHT_MODE, optimizer_mode, BUDGET_MODE,
                                 CALIBRATION_SEQUENCE, GROUPING_MODE, "success" if res_success else "failed", final_score,
