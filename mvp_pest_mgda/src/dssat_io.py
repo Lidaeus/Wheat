@@ -627,6 +627,16 @@ def rewrite_cul_values(cul_path: Path, cultivar_code: str, updates: dict[str, fl
         return
 
     header_cols: list[str] | None = None
+    fixed_numeric_order = ["P1V", "P1D", "P5", "G1", "G2", "G3", "PHINT"]
+    fixed_numeric_formats = {
+        "P1V": (6, 3),
+        "P1D": (6, 2),
+        "P5": (6, 1),
+        "G1": (6, 2),
+        "G2": (6, 2),
+        "G3": (6, 3),
+        "PHINT": (6, 2),
+    }
 
     def _line_ending(raw: str) -> str:
         if raw.endswith("\r\n"):
@@ -635,21 +645,22 @@ def rewrite_cul_values(cul_path: Path, cultivar_code: str, updates: dict[str, fl
             return "\n"
         return ""
 
-    def _format_value(existing_text: str, width: int, value: float) -> str:
-        # Determine format based on existing content (integer vs float)
+    def _format_fixed_numeric(col_name: str, value: float) -> str:
+        width, decimals = fixed_numeric_formats[col_name]
+        out = f"{float(value):>{width}.{decimals}f}"
+        if len(out) > width:
+            raise ValueError(f"Value {value} for {col_name} exceeds DSSAT width {width}")
+        return out
+
+    def _format_like_existing(existing_text: str, width: int, value: float) -> str:
         s = existing_text.strip()
         if "." in s:
             decimals = len(s.split(".", 1)[1])
-            # DSSAT standard: usually 1 or 2 decimals for CUL
-            fmt = f"{{:>{width}.{decimals}f}}"
-            out = fmt.format(value)
+            out = f"{float(value):>{width}.{decimals}f}"
         else:
-            out = f"{int(round(value)):>{width}d}"
-        
+            out = f"{int(round(float(value))):>{width}d}"
         if len(out) > width:
-            # If value overflows, try to fit by reducing precision or scientific notation
-            # But for CUL parameters, we usually just clip to width or error out
-            out = out[-width:]
+            raise ValueError(f"Value {value} exceeds DSSAT width {width} for column '{s}'")
         return out
 
     out_lines: list[str] = []
@@ -668,26 +679,49 @@ def rewrite_cul_values(cul_path: Path, cultivar_code: str, updates: dict[str, fl
             row_text = line.rstrip("\r\n")
             ending = _line_ending(line)
             
-            # Find all non-whitespace tokens and their positions in the row
-            # Matches GLUE's logic of using the header to define fields
-            matches = list(re.finditer(r"\S+", row_text))
-            
-            # If the number of values doesn't match the header, the file might be malformed
-            # or uses a different spacing. We fallback to simple header mapping.
-            if len(matches) < len(header_cols):
+            row_matches = list(re.finditer(r"\S+", row_text))
+            if len(row_matches) < len(header_cols):
                 out_lines.append(line)
                 continue
-                
-            # Build column spans (start, end)
-            col_to_span = {col: (m.start(), m.end()) for col, m in zip(header_cols, matches)}
+
+            row_tokens = [match.group(0) for match in row_matches[: len(header_cols)]]
+            row_by_col = {str(col).strip().upper(): row_tokens[idx] for idx, col in enumerate(header_cols)}
+
+            fixed_cols_applied: set[str] = set()
+            can_use_fixed_numeric_template = all(col in row_by_col for col in fixed_numeric_order)
+            if can_use_fixed_numeric_template and any(col in updates_u for col in fixed_numeric_order):
+                first_numeric_col = fixed_numeric_order[0]
+                first_numeric_idx = header_cols.index(first_numeric_col)
+                numeric_start = row_matches[first_numeric_idx].start()
+                prefix = row_text[:numeric_start]
+                trailing = row_text[row_matches[-1].end():]
+                numeric_values = {
+                    col: float(row_by_col[col]) if col in row_by_col else 0.0
+                    for col in fixed_numeric_order
+                }
+                for col_name, new_val in updates_u.items():
+                    if col_name in numeric_values:
+                        numeric_values[col_name] = float(new_val)
+                        fixed_cols_applied.add(col_name)
+                numeric_block = "".join(_format_fixed_numeric(col, numeric_values[col]) for col in fixed_numeric_order)
+                row_text = prefix + numeric_block + trailing
+                row_matches = list(re.finditer(r"\S+", row_text))
+
+            col_to_span: dict[str, tuple[int, int]] = {}
+            for idx, (col, match) in enumerate(zip(header_cols, row_matches)):
+                start = int(match.start())
+                end = int(row_matches[idx + 1].start()) if idx + 1 < len(row_matches) else len(row_text)
+                col_to_span[str(col).strip().upper()] = (start, end)
             
             row_chars = list(row_text)
             for col_name, new_val in updates_u.items():
+                if col_name in fixed_cols_applied:
+                    continue
                 if col_name in col_to_span:
                     a, b = col_to_span[col_name]
                     width = b - a
                     existing = "".join(row_chars[a:b])
-                    formatted = _format_value(existing, width, new_val)
+                    formatted = _format_like_existing(existing, width, new_val)
                     row_chars[a:b] = list(formatted)
             
             out_lines.append("".join(row_chars) + ending)
