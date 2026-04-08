@@ -20,3 +20,4 @@
 - 作物与实测文件: C:\DSSAT48\Wheat\SWSW7501.WHA, C:\DSSAT48\Wheat\SWSW7501.WHT, C:\DSSAT48\Wheat\SWSW7501.WHX
 - 目标函数: 使每个处理的模拟值总体上更接近实测值
 - 所有的正式运行规模至少应该为standard
+- 并发数（wokers）可以默认设置为14个，以缩短运行时间

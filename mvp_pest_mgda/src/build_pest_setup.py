@@ -626,6 +626,60 @@ def _calc_group_maxima(
     return out
 
 
+def _calc_group_rms(
+    meas: dict[str, float],
+    split_by_trt: dict[int, str],
+    group_defs: dict,
+    yield_prefix: str,
+    laix_prefix: str,
+) -> dict[str, float]:
+    group_vals: dict[str, list[float]] = {}
+    for oname, oval in meas.items():
+        trt = _extract_trt_from_obs_name(oname)
+        if (trt is not None) and (split_by_trt.get(int(trt)) == "valid"):
+            continue
+        try:
+            v = float(oval)
+        except Exception:
+            continue
+        g = _resolve_obs_group_name(oname, group_defs, yield_prefix, laix_prefix)
+        group_vals.setdefault(g, []).append(v)
+    out: dict[str, float] = {}
+    for g, vals in group_vals.items():
+        if not vals:
+            out[g] = float("nan")
+            continue
+        out[g] = float(math.sqrt(sum(float(v) ** 2 for v in vals) / float(len(vals))))
+    return out
+
+
+def _calc_group_mean_abs(
+    meas: dict[str, float],
+    split_by_trt: dict[int, str],
+    group_defs: dict,
+    yield_prefix: str,
+    laix_prefix: str,
+) -> dict[str, float]:
+    group_vals: dict[str, list[float]] = {}
+    for oname, oval in meas.items():
+        trt = _extract_trt_from_obs_name(oname)
+        if (trt is not None) and (split_by_trt.get(int(trt)) == "valid"):
+            continue
+        try:
+            v = abs(float(oval))
+        except Exception:
+            continue
+        g = _resolve_obs_group_name(oname, group_defs, yield_prefix, laix_prefix)
+        group_vals.setdefault(g, []).append(v)
+    out: dict[str, float] = {}
+    for g, vals in group_vals.items():
+        if not vals:
+            out[g] = float("nan")
+            continue
+        out[g] = float(sum(vals) / float(len(vals)))
+    return out
+
+
 def _build_dropped_group_records(
     group_defs: dict[str, dict[str, object]],
     group_weights: dict[str, float],
@@ -1383,6 +1437,8 @@ def main() -> None:
     ).strip().lower()
     group_variances = _calc_group_variances(meas, split_by_trt, group_defs, yield_prefix, laix_prefix)
     group_maxima = _calc_group_maxima(meas, split_by_trt, group_defs, yield_prefix, laix_prefix)
+    group_rms = _calc_group_rms(meas, split_by_trt, group_defs, yield_prefix, laix_prefix)
+    group_mean_abs = _calc_group_mean_abs(meas, split_by_trt, group_defs, yield_prefix, laix_prefix)
     
     # 尝试加载 MGDA 的反馈 Alpha 权重 (显式开启)
     mgda_alphas: dict[str, float] = {}
@@ -1400,7 +1456,15 @@ def main() -> None:
     else:
         print("Using standard inverse-variance weights (Alpha-Feedback disabled).")
 
-    group_weights = compute_group_weights(group_defs, group_variances, group_maxima, weight_mode, mgda_alphas)
+    group_weights = compute_group_weights(
+        group_defs,
+        group_variances,
+        group_maxima,
+        group_rms,
+        group_mean_abs,
+        weight_mode,
+        mgda_alphas,
+    )
     active_metrics = _parse_name_list(os.environ.get("PEST_ACTIVE_METRICS", ""))
     _write_build_setup_protocol_artifacts(
         cwd=cwd,

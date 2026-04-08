@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 import shutil
 from pathlib import Path
 
@@ -184,21 +185,25 @@ def runtime_cultivar_dir_text(cultivar_dir: Path) -> str:
 
 def rewrite_cultivar_path_row(file_name: str, row: str, new_dir: str) -> tuple[str, bool]:
     upper_name = str(file_name).upper()
+    path_match = re.search(r"[A-Za-z]:\\.*$", row)
     if upper_name.endswith(".INP"):
         should_replace = (
             row.startswith("SPECIES")
             or row.startswith("ECOTYPE")
             or row.startswith("CULTIVAR")
-        ) and "C:\\" in row
+        ) and path_match is not None
         error_prefix = "DSSAT48.INP"
     else:
-        should_replace = any(ext in row.upper() for ext in (".CUL", ".ECO", ".SPE")) and "C:\\" in row
+        should_replace = any(ext in row.upper() for ext in (".CUL", ".ECO", ".SPE")) and path_match is not None
         error_prefix = "DSSAT48.INH"
 
     if not should_replace:
         return row, False
 
-    idx = row.index("C:\\")
+    if path_match is None:
+        return row, False
+
+    idx = int(path_match.start())
     old_tail = row[idx:]
     repl = new_dir.ljust(len(old_tail))[: len(old_tail)]
     orig_len = len(row)

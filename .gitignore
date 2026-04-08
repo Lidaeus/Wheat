@@ -76,3 +76,5 @@ docs/reference/DSSAT-PEST/.RData
 docs/reference/DSSAT-PEST/.Rhistory
 docs/reference/DSSAT-PEST/ERROR.txt
 docs/reference/DSSAT-PEST/PEST_software/*.eer
+.dssat_rt/
+autoresearch_sandbox/tmp_weight_audit/

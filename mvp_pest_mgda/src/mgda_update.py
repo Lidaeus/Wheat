@@ -518,7 +518,33 @@ def main() -> None:
     grad_x = d * scale
     ng = float(np.linalg.norm(grad_x))
     if ng <= 0.0 or not math.isfinite(ng):
-        raise RuntimeError("MGDA direction is degenerate")
+        _write_params_dat(out_params_path, p0)
+        alpha_lines = "\n".join([f"alpha[{k}]={v:.6f}" for k, v in alpha_by_group.items()])
+        norm_lines = "\n".join([f"grad_norm_raw[{k}]={v:.6e}" for k, v in raw_norms.items()])
+        post_norm_lines = "\n".join([f"grad_norm_post[{k}]={v:.6e}" for k, v in post_norms.items()])
+        size_lines = "\n".join([f"group_size[{k}]={v:d}" for k, v in group_sizes.items()])
+        near_zero_groups_line = "near_zero_groups=" + ",".join(near_zero_groups) if near_zero_groups else ""
+        active_groups_line = "active_groups=" + ",".join(active_groups) if active_groups else ""
+        (cwd / "mgda_report.txt").write_text(
+            "status=pareto_stationary\n"
+            + "reason=direction_degenerate\n"
+            + f"near_zero_eps={near_zero_eps:.6e}\n"
+            + (near_zero_groups_line + "\n" if near_zero_groups_line else "")
+            + (active_groups_line + "\n" if active_groups_line else "")
+            + norm_lines
+            + ("\n" if norm_lines else "")
+            + post_norm_lines
+            + ("\n" if post_norm_lines else "")
+            + size_lines
+            + ("\n" if size_lines else "")
+            + alpha_lines
+            + ("\n" if alpha_lines else "")
+            + "step=0.000000\n"
+            + "\n".join([f"{k}={v:.6f}" for k, v in p0.items()])
+            + "\n",
+            encoding="utf-8",
+        )
+        return
     grad_x = grad_x / ng
 
     step0 = float((cwd / "step.txt").read_text(encoding="utf-8").strip()) if (cwd / "step.txt").exists() else 0.2

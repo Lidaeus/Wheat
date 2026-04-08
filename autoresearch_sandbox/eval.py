@@ -3,6 +3,7 @@ import json
 import os
 import random
 import shutil
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -193,6 +194,7 @@ PUBLIC_API_PATH = PATHS.public_api_path
 RUNS_DIR = PATHS.runs_dir
 RUNTIME_DIR = PATHS.runtime_dir
 RUN_MODEL_PATH = SRC_DIR / "run_model.py"
+MGDA_UPDATE_PATH = SRC_DIR / "mgda_update.py"
 
 
 _PUBLIC_API = load_mvp_public_api(PUBLIC_API_PATH)
@@ -1013,7 +1015,7 @@ def validate_experiment_configuration():
         return f"{WEIGHT_MODE} requires g3_dssat_extended grouping for S3/WLS refinement"
     if WEIGHT_MODE == "w9_pareto_no_preweight" and optimizer_mode not in {"o4_nsga2", "o5_mgda"}:
         return "W9 Pareto / No Pre-Weight only supports O4 NSGA-II or O5 MGDA"
-    if optimizer_mode in {"o4_nsga2", "o5_mgda"}:
+    if optimizer_mode == "o4_nsga2":
         return f"{optimizer_mode} is documented in the design but not yet implemented in this sandbox runtime"
     return ""
 
@@ -1399,8 +1401,29 @@ def parse_best_glm_result(start_params):
     )
 
 
+def parse_named_params_file(path, start_params):
+    params = np.array(start_params, dtype=float)
+    resolved = Path(path)
+    if not resolved.exists():
+        raise RuntimeError(f"Missing parameter file: {resolved}")
+    name_to_index = {str(name).strip().lower(): idx for idx, name in enumerate(PARAM_NAMES)}
+    for raw in resolved.read_text(encoding="utf-8", errors="ignore").splitlines():
+        parts = raw.split()
+        if len(parts) < 2:
+            continue
+        idx = name_to_index.get(parts[0].strip().lower())
+        if idx is None:
+            continue
+        try:
+            params[idx] = float(parts[1])
+        except ValueError:
+            continue
+    return clip_params(params)
+
+
 def build_pest_stage_env(stage, budget_profile, optimizer_mode):
     migrate_legacy_runtime_files()
+    pest_weight_mode = str(WEIGHT_MODE_ENV or WEIGHT_MODE).strip().lower()
     env = build_run_model_env(
         params_path=PARAMS_PATH,
         trts=SCENARIO_TRTS,
@@ -1409,7 +1432,7 @@ def build_pest_stage_env(stage, budget_profile, optimizer_mode):
         extra_env={
             "PEST_ACTIVE_PARAMS": ",".join(active_stage_param_names(stage)),
             "PEST_ACTIVE_METRICS": ",".join(stage["metrics"]),
-            "PEST_OBS_WEIGHT_MODE": WEIGHT_MODE,
+            "PEST_OBS_WEIGHT_MODE": pest_weight_mode,
             "DSSAT_RUN_STATS_PATH": str(RUN_MODEL_STATS_PATH),
             "PEST_NOPTMAX": str(
                 int(
@@ -1429,6 +1452,41 @@ def build_pest_stage_env(stage, budget_profile, optimizer_mode):
         env["PESTPP_IES_NUM_REALS"] = str(int(os.environ.get("PESTPP_IES_NUM_REALS", budget_profile["ies_num_reals"])))
         env["PESTPP_IES_SUBSET_SIZE"] = str(int(os.environ.get("PESTPP_IES_SUBSET_SIZE", budget_profile["ies_subset_size"])))
     return env
+
+
+def run_mgda_update(env):
+    ensure_runtime_dir()
+    mgda_params_path = RUNTIME_DIR / "params_mgda.dat"
+    mgda_log_path = RUNTIME_DIR / "mgda_console.log"
+    mgda_report_path = RUNTIME_DIR / "mgda_report.txt"
+    for stale_path in (mgda_params_path, mgda_log_path, mgda_report_path):
+        stale_path.unlink(missing_ok=True)
+    process_env = os.environ.copy()
+    process_env.update({str(k): str(v) for k, v in env.items()})
+    process_env["OUT_PARAMS_PATH"] = str(mgda_params_path)
+    pythonpath_parts = [str(SRC_DIR)]
+    existing_pythonpath = str(process_env.get("PYTHONPATH", "")).strip()
+    if existing_pythonpath:
+        pythonpath_parts.append(existing_pythonpath)
+    process_env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
+    result = subprocess.run(
+        [sys.executable, str(MGDA_UPDATE_PATH)],
+        cwd=str(RUNTIME_DIR),
+        env=process_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    mgda_log_path.write_text(combined_output, encoding="utf-8")
+    if result.returncode != 0:
+        tail = (combined_output or "mgda_update failed without output")[-1000:]
+        raise RuntimeError(f"mgda_update.py failed (exit {result.returncode}): {tail}")
+    if not mgda_params_path.exists():
+        raise RuntimeError("mgda_update.py did not produce params_mgda.dat")
+    if not mgda_report_path.exists():
+        raise RuntimeError("mgda_update.py did not produce mgda_report.txt")
+    return mgda_params_path
 
 
 def run_pestpp_ies_stage(start_params, stage, budget_profile):
@@ -1788,6 +1846,73 @@ def run_pestpp_glm_optimization():
     return params, last_loss, success
 
 
+def run_mgda_stage(start_params, stage, budget_profile, wls_weights=None):
+    cleanup_pestpp_outputs()
+    write_params_file(start_params)
+
+    env = build_pest_stage_env(stage, budget_profile, optimizer_mode="glm")
+    progress_log("pest_setup_start", optimizer="o5_mgda", stage=CURRENT_STAGE_CONTEXT["name"], runtime_dir=RUNTIME_DIR)
+    run_build_pest_setup(working_dir=RUNTIME_DIR, env=env, python_executable=sys.executable)
+    progress_log("pest_setup_done", optimizer="o5_mgda", stage=CURRENT_STAGE_CONTEXT["name"])
+
+    progress_log("pest_solver_start", optimizer="o5_mgda", stage=CURRENT_STAGE_CONTEXT["name"])
+    try:
+        run_pestpp_executable("pestpp-glm.exe", env, pst_filename="ksas_mvp.pst", failure_label="pestpp-glm execution for mgda")
+    except Exception as exc:
+        message = str(exc)
+        if "jacobian matrix has no non-zeros" in message or "all parameters at/near bounds" in message:
+            progress_log(
+                "pest_solver_fallback_to_stage_loss",
+                optimizer="o5_mgda",
+                stage=CURRENT_STAGE_CONTEXT["name"],
+                reason="zero_jacobian_or_bound_lock",
+            )
+            metric_weights = stage_metric_weights(start_params, stage, wls_weights=wls_weights)
+            fallback_loss = objective_function(
+                start_params,
+                metrics=stage["metrics"],
+                split_name="train",
+                metric_weights=metric_weights,
+                normalize=normalize_residuals_for_weight_mode() and stage["mode"] != "wls",
+            )
+            return np.array(start_params, dtype=float), float(fallback_loss), False
+        raise
+    progress_log("pest_solver_done", optimizer="o5_mgda", stage=CURRENT_STAGE_CONTEXT["name"])
+
+    progress_log("mgda_update_start", optimizer="o5_mgda", stage=CURRENT_STAGE_CONTEXT["name"])
+    mgda_params_path = run_mgda_update(env)
+    progress_log("mgda_update_done", optimizer="o5_mgda", stage=CURRENT_STAGE_CONTEXT["name"])
+
+    best_params = parse_named_params_file(mgda_params_path, start_params)
+    metric_weights = stage_metric_weights(best_params, stage, wls_weights=wls_weights)
+    stage_loss = objective_function(
+        best_params,
+        metrics=stage["metrics"],
+        split_name="train",
+        metric_weights=metric_weights,
+        normalize=normalize_residuals_for_weight_mode() and stage["mode"] != "wls",
+    )
+    return best_params, float(stage_loss), True
+
+
+def run_mgda_optimization():
+    params = clip_params(INITIAL_GUESS)
+    last_loss = 1e9
+    success = True
+    budget_profile = get_budget_profile()
+    stage_variances = {}
+    stage_plan = sequence_stage_plan()
+    for stage_index, stage in enumerate(stage_plan, start=1):
+        log_stage_start(stage, stage_index, len(stage_plan), "o5_mgda")
+        wls_weights = build_agmip_wls_weights(stage_variances) if stage["mode"] == "wls" else None
+        params, last_loss, stage_success = run_mgda_stage(params, stage, budget_profile, wls_weights=wls_weights)
+        success = success and stage_success
+        if stage["mode"] != "wls":
+            stage_variances.update(compute_stage_variances(params, stage["metrics"]))
+        log_stage_end(stage, stage_index, len(stage_plan), stage_success, last_loss)
+    return params, last_loss, success
+
+
 def score_metrics(sim_metrics, metrics, split_name="all"):
     metric_scores = []
     for metric_name in metrics:
@@ -1921,6 +2046,8 @@ def main():
                 best_params, res_fun, res_success = run_least_squares_optimization()
             elif optimizer_mode == "o2_pestpp_ies":
                 best_params, res_fun, res_success = run_pestpp_ies_optimization()
+            elif optimizer_mode == "o5_mgda":
+                best_params, res_fun, res_success = run_mgda_optimization()
             elif optimizer_mode == "o6_pestpp_glm":
                 best_params, res_fun, res_success = run_pestpp_glm_optimization()
             else:

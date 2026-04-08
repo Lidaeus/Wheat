@@ -108,6 +108,8 @@ def compute_group_weights(
     group_defs: dict[str, dict[str, Any]],
     group_variances: dict[str, float],
     group_maxima: dict[str, float],
+    group_rms: dict[str, float] | None,
+    group_means_abs: dict[str, float] | None,
     weight_mode: str,
     mgda_alphas: dict[str, float] | None = None,
 ) -> dict[str, float]:
@@ -117,11 +119,24 @@ def compute_group_weights(
     for group_name in set(group_variances.keys()) | set(group_maxima.keys()):
         variance = float(group_variances.get(group_name, float("nan")))
         maximum = float(group_maxima.get(group_name, float("nan")))
+        rms = float((group_rms or {}).get(group_name, float("nan")))
+        mean_abs = float((group_means_abs or {}).get(group_name, float("nan")))
         fallback_weight = float(group_defs.get(group_name, {}).get("weight", 1.0))
         sigma = float(group_defs.get(group_name, {}).get("sigma", 1.0))
-        if str(weight_mode).strip().lower() == "w8_dssat_group_max":
+        weight_mode_name = str(weight_mode).strip().lower()
+        if weight_mode_name == "w8_dssat_group_max":
             if math.isfinite(maximum) and maximum > 0.0:
                 base_weight = 1.0 / maximum
+            else:
+                base_weight = fallback_weight
+        elif weight_mode_name in {"w2", "inverse_rmse", "w2_inverse_rmse"}:
+            if math.isfinite(rms) and rms > 0.0:
+                base_weight = 1.0 / rms
+            else:
+                base_weight = fallback_weight
+        elif weight_mode_name in {"w5", "mean_normalized", "mean_normalization", "nrmse", "w5_mean_normalized"}:
+            if math.isfinite(mean_abs) and mean_abs > 0.0:
+                base_weight = 1.0 / mean_abs
             else:
                 base_weight = fallback_weight
         else:

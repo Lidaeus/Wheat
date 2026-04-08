@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import json
 import os
 import shutil
@@ -25,11 +26,12 @@ W_MAP = {
     "W5": "w5_mean_normalized",
     "W6": "w6_log_transformation",
     "W8": "w8_dssat_group_max",
-    "PM": "pure_mgda",
+    "W9": "w9_pareto_no_preweight",
 }
 O_MAP = {
     "O1": "o6_pestpp_glm",
     "O2": "o2_pestpp_ies",
+    "O5": "o5_mgda",
 }
 S_MAP = {
     "S1": "s1_naive_joint",
@@ -99,8 +101,16 @@ BATCH_C = [
     ("W4", "O2", "S2", "G3"),
 ]
 BATCH_D = [(w, o, s, g) for w in ("W0", "W4", "W6", "W8") for o in ("O1", "O2") for s in ("S1", "S2") for g in ("G1", "G3")]
-LEGACY_CORE = [(w, o, "S2", "G3") for w in ("W2", "W5", "PM") for o in ("O1", "O2")]
-BATCH_MAP = {"BatchA": BATCH_A, "BatchB": BATCH_B, "BatchC": BATCH_C, "BatchD": BATCH_D, "LegacyCore": LEGACY_CORE}
+LEGACY_CORE = [(w, o, "S2", "G3") for w in ("W2", "W5") for o in ("O1", "O2")]
+LEGACY_MGDA = [("W9", "O5", "S2", "G3")]
+BATCH_MAP = {
+    "BatchA": BATCH_A,
+    "BatchB": BATCH_B,
+    "BatchC": BATCH_C,
+    "BatchD": BATCH_D,
+    "LegacyCore": LEGACY_CORE,
+    "LegacyMGDA": LEGACY_MGDA,
+}
 
 SUMMARY_FIELDS = [
     "run_id", "combo_key", "executed_at", "plan", "weight", "engine", "budget",
@@ -218,6 +228,11 @@ def create_session_root(batch: str, budget: str, tag: str) -> Path:
     return session_root
 
 
+def runtime_root_for_run(run_id: str) -> Path:
+    token = hashlib.sha1(str(run_id).encode("utf-8")).hexdigest()[:12]
+    return PROJECT_ROOT / ".dssat_rt" / token
+
+
 def initialize_output_tables(session_root: Path) -> None:
     init_tsv(session_root / "phase1_experiment_summary.tsv", SUMMARY_FIELDS)
     init_tsv(session_root / "phase1_aggregate_metrics.tsv", AGG_FIELDS)
@@ -246,7 +261,8 @@ def build_jobs(
     crop_configs = resolve_crop_configs()
     jobs: list[dict] = []
     skipped_crops: dict[str, str] = {}
-    if batch in {"Baselines", "All", "LegacyCore"}:
+    seen_combo_instances: set[tuple[str, str, int]] = set()
+    if batch in {"Baselines", "All", "LegacyCore", "LegacyMGDA"}:
         for crop in crops:
             config_path = crop_configs.get(crop)
             if not config_path:
@@ -290,9 +306,14 @@ def build_jobs(
                 continue
             for w, o, s, g in BATCH_MAP[batch_name]:
                 combo_key = f"{w}_{o}_{s}_{g}"
-                if combo_keys and combo_key not in combo_keys:
+                combo_aliases = {"PM_O5_S2_G3"} if combo_key == "W9_O5_S2_G3" else set()
+                if combo_keys and combo_key not in combo_keys and combo_aliases.isdisjoint(combo_keys):
                     continue
                 for rep in range(repetitions):
+                    combo_instance = (str(crop).strip().lower(), combo_key, int(rep))
+                    if combo_instance in seen_combo_instances:
+                        continue
+                    seen_combo_instances.add(combo_instance)
                     run_id = f"{combo_key}_{crop.lower()}_rep{rep}_{uuid.uuid4().hex[:6]}"
                     jobs.append({
                         "run_id": run_id,
@@ -340,6 +361,7 @@ def run_job(job: dict, session_root: Path) -> dict:
         env["AR_PLAN"] = str(job["plan"])
         env["AR_SANDBOX_DIR"] = str(workspace_dir)
         env["DSSAT_CASE_DIR"] = str(workspace_dir / "dssat_case")
+        env["DSSAT_RUNTIME_ROOT"] = str(runtime_root_for_run(str(job["run_id"])))
         env["DSSAT_SKIP_TASKKILL"] = "1"
         env["AR_MVP_ROOT"] = str(MVP_ROOT)
         env["PEST_RUN_MODEL_PYTHON"] = python_executable()
@@ -369,7 +391,7 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batch", choices=["Baselines", "BatchA", "BatchB", "BatchC", "BatchD", "LegacyCore", "All"], default="All")
+    parser.add_argument("--batch", choices=["Baselines", "BatchA", "BatchB", "BatchC", "BatchD", "LegacyCore", "LegacyMGDA", "All"], default="All")
     parser.add_argument("--repetitions", type=int, default=5)
     parser.add_argument("--workers", type=int, default=14)
     parser.add_argument("--budget", choices=["quick", "standard", "matrix", "phase3_formal"], default="quick")
