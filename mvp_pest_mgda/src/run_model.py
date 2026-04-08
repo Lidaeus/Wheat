@@ -338,6 +338,25 @@ def _try_unlink(path: Path, tries: int = 10, sleep_s: float = 0.1) -> None:
     return
 
 
+def _acquire_cultivar_lock(cul_path: Path, timeout_s: float = 300.0, poll_s: float = 0.2) -> Path:
+    lock_path = cul_path.with_suffix(cul_path.suffix + ".lock")
+    deadline = time.time() + float(timeout_s)
+    while True:
+        try:
+            handle = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(handle, str(os.getpid()).encode("utf-8", errors="ignore"))
+            os.close(handle)
+            return lock_path
+        except FileExistsError:
+            if time.time() >= deadline:
+                raise TimeoutError(f"Timed out waiting for cultivar lock: {lock_path}")
+            time.sleep(float(poll_s))
+
+
+def _release_cultivar_lock(lock_path: Path) -> None:
+    _try_unlink(lock_path, tries=5, sleep_s=0.1)
+
+
 def _kill_dssat_processes(exe: Path) -> None:
     if os.environ.get("DSSAT_SKIP_TASKKILL", "").strip().lower() in {"1", "true", "yes", "y"}:
         return
@@ -400,6 +419,36 @@ def _run_dssat(filex: str, trt: int, cwd: Path, cfg: dict) -> None:
         time.sleep(0.2 * (attempt + 1))
     if last_error is not None:
         raise last_error
+
+
+def _assert_case_support_paths(dssat_dir: Path, cultivar_dir: Path) -> None:
+    expected_dir = str(cultivar_dir.resolve()).upper()
+    for name in ("DSSAT48.INP", "DSSAT48.INH"):
+        path = dssat_dir / name
+        if not path.exists():
+            continue
+        raw = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        relevant = [
+            line.strip().upper()
+            for line in raw
+            if (
+                (name.endswith(".INP") and line.startswith(("SPECIES", "ECOTYPE", "CULTIVAR")))
+                or (name.endswith(".INH") and any(ext in line.upper() for ext in (".CUL", ".ECO", ".SPE")))
+            )
+        ]
+        if relevant and not any(expected_dir in line for line in relevant):
+            raise RuntimeError(f"{name} cultivar path patch failed for {dssat_dir}")
+
+
+def _patch_case_support_dirs(case_dirs: list[Path], cultivar_dir: Path) -> None:
+    seen: set[Path] = set()
+    for case_dir in case_dirs:
+        resolved = case_dir.resolve()
+        if resolved in seen or not resolved.exists():
+            continue
+        seen.add(resolved)
+        patch_cultivar_dir_in_inp_inh(resolved, cultivar_dir)
+        _assert_case_support_paths(resolved, cultivar_dir)
 
 
 def _choose_case_dir(cwd: Path, project_root: Path, cfg: dict) -> Path:
@@ -587,6 +636,16 @@ def _extract_cultivar_code(filex_path: Path) -> str:
     return extract_cultivar_code(filex_path)
 
 
+def _extract_cultivar_row_text(cul_path: Path, cultivar_code: str) -> str:
+    target = str(cultivar_code).strip()
+    if not target or not cul_path.exists():
+        return ""
+    for line in cul_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if line.startswith(target):
+            return line
+    return ""
+
+
 def _rewrite_cul_params(cul_path: Path, cultivar_code: str, updates: dict[str, float]) -> None:
     rewrite_cul_values(cul_path, cultivar_code, {str(k).strip().upper(): float(v) for k, v in updates.items()})
 
@@ -658,12 +717,24 @@ def execute_case(
         rewrite_sol_layers(case_runtime.input_plan.sol_path, case_runtime.input_plan.sol_updates)
 
     _clear_output_files(dssat_dir)
+    lock_path = _acquire_cultivar_lock(cul_path)
+    audit_enabled = os.environ.get("DSSAT_DEBUG_CUL_AUDIT", "").strip().lower() in {"1", "true", "yes", "y"}
+    audit_path = Path(os.environ.get("DSSAT_CUL_AUDIT_PATH", str(dssat_dir / "cul_audit.json")))
+    audit_payload = {
+        "cul_path": str(cul_path),
+        "cultivar_code": str(cultivar_code),
+        "before_row": _extract_cultivar_row_text(cul_path, cultivar_code),
+        "updates": {str(k): float(v) for k, v in case_runtime.input_plan.cul_updates.items()},
+    }
 
     try:
         if case_runtime.input_plan.has_sh2o:
             rewrite_initial_sh2o(base, live_filex, case_runtime.input_plan.sh2o_by_icbl)
         if case_runtime.input_plan.cul_updates:
             _rewrite_cul_params(cul_path, cultivar_code, case_runtime.input_plan.cul_updates)
+            audit_payload["after_row"] = _extract_cultivar_row_text(cul_path, cultivar_code)
+        if audit_enabled:
+            audit_path.write_text(json.dumps(audit_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
         metrics_by_trt: MetricsByTreatment = {}
         treatment_calls = 0
@@ -673,6 +744,7 @@ def execute_case(
         return metrics_by_trt, treatment_calls
     finally:
         _restore_runtime_files(file_state)
+        _release_cultivar_lock(lock_path)
         if not keep_outputs:
             _clear_output_files(dssat_dir)
 
@@ -740,10 +812,14 @@ def prepare_case_run(cwd: Path | None = None) -> PreparedCaseRun:
         env_dssat_exe=os.environ.get("DSSAT_EXE", ""),
     )
     cfg.setdefault("paths", {})["dssat_exe"] = str(runtime_exe)
-    runtime_cul_path = runtime_genotype / cul_path.name
+    runtime_cul_path = fallback_root_cul
     cultivar_code = _extract_cultivar_code(live_filex)
 
-    patch_cultivar_dir_in_inp_inh(dssat_dir, runtime_genotype)
+    case_dirs_to_patch = [dssat_dir]
+    local_case_dir = (run_cwd / "dssat_case").resolve()
+    if local_case_dir.exists():
+        case_dirs_to_patch.append(local_case_dir)
+    _patch_case_support_dirs(case_dirs_to_patch, fallback_root_cul.parent)
     case_runtime = resolve_case_runtime(
         dssat_dir,
         cfg,
