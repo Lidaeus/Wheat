@@ -1,0 +1,5 @@
+run_id	split	metric	group_label	nrmse
+wheat_w8_o1_s2_g3_rep0	train	yield	yield	0.10
+wheat_w8_o1_s2_g3_rep0	train	phenology	phenology	0.30
+wheat_w8_o1_s2_g3_rep1	train	yield	yield	0.20
+wheat_w8_o1_s2_g3_rep1	train	phenology	phenology	0.40

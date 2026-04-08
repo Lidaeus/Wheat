@@ -88,6 +88,8 @@ def resolve_project_config_path(
 ) -> Path | None:
     resolved_crop = resolve_requested_crop_family(crop, env_var_names=crop_env_var_names)
     cfg_path = os.environ.get(env_var, "").strip()
+    if not cfg_path and env_var == "PROJECT_CONFIG":
+        cfg_path = os.environ.get("PEST_PROJECT_CONFIG", "").strip()
     resolved_env_path = Path(cfg_path).resolve() if cfg_path else None
     if resolved_env_path is not None and not resolved_env_path.exists():
         resolved_env_path = None

@@ -1,0 +1,4 @@
+crop	combo_key	plan	weight	engine	sequence	grouping	run_count	success_count	failure_rate	score_mean	score_std	primary_score_mean	primary_score_std	better_than_b0_rate	boundary_hit_rate_mean	param_shift_norm_mean	group_balance_index_mean	eval_call_count_mean	run_model_invocations_mean	dssat_treatment_calls_mean	dssat_wall_sec_mean
+wheat	B0	Baselines	W0	O1	S1	G1	1	1	0.000000	10.000000	0.000000	0.120000	0.000000	0.000000	0.000000	0.000000	0.000000	10.000000	1.000000	4.000000	2.000000
+wheat	B1	Baselines	W0	O2	S1	G1	1	1	0.000000	11.000000	0.000000	0.130000	0.000000	0.000000	0.000000	0.000000	0.000000	11.000000	1.000000	4.000000	2.100000
+wheat	W8_O1_S2_G3	BatchB	W8	O1	S2	G3	2	2	0.000000	7.500000	0.500000	0.105000	0.005000	1.000000	0.500000	0.500000	0.100000	20.500000	2.000000	8.000000	3.050000

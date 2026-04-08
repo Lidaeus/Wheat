@@ -359,6 +359,56 @@ def _load_project_config(project_root: Path) -> dict:
     return load_project_config(project_root, crop=os.environ.get("PROJECT_CROP", ""))
 
 
+def _resolve_case_path(raw_path: str, dssat_dir: Path) -> Path:
+    candidate = Path(str(raw_path).strip())
+    if candidate.is_absolute():
+        return candidate
+    return dssat_dir / candidate
+
+
+def _resolve_filex_paths(cfg: dict, dssat_dir: Path) -> tuple[Path, Path]:
+    scenario_cfg = cfg.get("scenario", {}) or {}
+    paths_cfg = cfg.get("paths", {}) or {}
+
+    # Priority: Env > scenario.filex > paths.live_filex > root.dssat_filex > default
+    live_raw = (
+        os.environ.get("DSSAT_FILEX", "").strip()
+        or str(scenario_cfg.get("filex", "")).strip()
+        or str(paths_cfg.get("live_filex", "")).strip()
+        or str(cfg.get("dssat_filex", "")).strip()
+    )
+    if not live_raw:
+        # Accept legacy name format if present
+        live_raw = str(cfg.get("dssat_filex", "")).strip() or "KSAS8101.WHX"
+
+    base_raw = (
+        str(scenario_cfg.get("base_filex", "")).strip()
+        or str(paths_cfg.get("base_filex", "")).strip()
+        or str(cfg.get("base_filex", "")).strip()
+    )
+
+    live_filex = _resolve_case_path(live_raw, dssat_dir)
+    
+    if not base_raw:
+        if live_filex.exists():
+            base_raw = live_raw
+        else:
+            # Smart fallback template based on crop suffix if available
+            ext_suffix = live_filex.suffix.upper()
+            if ext_suffix.startswith(".WH"):
+                base_raw = "KSAS8101_base.WHX"
+            elif ext_suffix.startswith(".MZ") or ext_suffix.startswith(".MA"):
+                base_raw = "UFGA8201_base.MZX"
+            elif ext_suffix.startswith(".SB"): # Soybean
+                base_raw = "UFGA8201_base.SBX"
+            else:
+                 # Default to the legacy Wheat template if we can't decide
+                 base_raw = "KSAS8101_base.WHX"
+
+    base_filex = _resolve_case_path(base_raw, dssat_dir)
+    return live_filex, base_filex
+
+
 def _read_params(params_path: Path) -> dict[str, float]:
     params: dict[str, float] = {}
     for raw in params_path.read_text(encoding="utf-8", errors="ignore").splitlines():
@@ -677,6 +727,16 @@ def execute_case(
             _clear_output_files(dssat_dir)
 
 
+def _coerce_execute_case_result(result: object, trts: list[int]) -> tuple[MetricsByTreatment, int]:
+    if isinstance(result, tuple) and len(result) == 2:
+        metrics_by_trt, treatment_calls = result
+        if isinstance(metrics_by_trt, dict):
+            return metrics_by_trt, int(treatment_calls)
+    if isinstance(result, dict):
+        return result, len(trts)
+    raise TypeError("execute_case() must return either metrics_by_trt or (metrics_by_trt, treatment_calls)")
+
+
 def prepare_case_run(cwd: Path | None = None) -> PreparedCaseRun:
     run_cwd = Path.cwd() if cwd is None else Path(cwd)
     params_path = Path(os.environ.get("PARAMS_PATH", str(run_cwd / "params.dat")))
@@ -708,13 +768,11 @@ def prepare_case_run(cwd: Path | None = None) -> PreparedCaseRun:
             mapped_params[mapped] = float(value)
         params = mapped_params
 
-    filex_name = cfg.get("scenario", {}).get("filex", "KSAS8101.WHX")
-    base_filex = cfg.get("scenario", {}).get("base_filex", "KSAS8101_base.WHX")
-    base = dssat_dir / base_filex
+    live_filex, base = _resolve_filex_paths(cfg, dssat_dir)
+    filex_name = live_filex.name
     if not base.exists():
         raise FileNotFoundError(f"Missing base FileX template: {base}")
 
-    live_filex = dssat_dir / filex_name
     if not live_filex.exists():
         raise FileNotFoundError(f"Missing live FileX: {live_filex}")
 
@@ -783,7 +841,8 @@ def main() -> None:
     started_at = time.time()
     treatment_calls = 0
     try:
-        metrics_by_trt, treatment_calls = execute_case(
+        metrics_by_trt, treatment_calls = _coerce_execute_case_result(
+            execute_case(
             prepared.base,
             prepared.live_filex,
             prepared.cul_path,
@@ -795,6 +854,8 @@ def main() -> None:
             prepared.case_runtime,
             prepared.file_state,
             prepared.keep_outputs,
+            ),
+            prepared.trts,
         )
         append_run_stats(
             cwd=cwd,

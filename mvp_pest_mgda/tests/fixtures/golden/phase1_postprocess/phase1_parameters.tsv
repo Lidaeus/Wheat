@@ -1,0 +1,5 @@
+run_id	param_name	normalized_distance_to_b0	is_at_lower_bound	is_at_upper_bound
+wheat_w8_o1_s2_g3_rep0	P1	0.20	false	false
+wheat_w8_o1_s2_g3_rep0	P2	0.60	true	false
+wheat_w8_o1_s2_g3_rep1	P1	0.40	false	true
+wheat_w8_o1_s2_g3_rep1	P2	0.80	false	false

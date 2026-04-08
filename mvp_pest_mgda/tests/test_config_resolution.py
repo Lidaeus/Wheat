@@ -2218,16 +2218,23 @@ class TestConfigResolution(unittest.TestCase):
                 clear=False,
             ):
                 prepared = run_model.prepare_case_run(root)
-                metrics_by_trt = run_model.execute_case(
-                    root,
-                    prepared.case_runtime,
+                metrics_by_trt, treatment_calls = run_model.execute_case(
+                    prepared.base,
+                    prepared.live_filex,
+                    prepared.cul_path,
+                    prepared.cultivar_code,
+                    prepared.filex_name,
+                    prepared.dssat_dir,
                     prepared.cfg,
-                    prepared.params,
                     prepared.trts,
+                    prepared.case_runtime,
+                    prepared.file_state,
+                    prepared.keep_outputs,
                 )
 
-        self.assertEqual(prepared.case_runtime.dssat_dir, case_dir)
+        self.assertEqual(prepared.dssat_dir, case_dir)
         self.assertEqual(prepared.trts, [1])
+        self.assertEqual(treatment_calls, 1)
         self.assertIn(1, metrics_by_trt)
         self.assertIn("hwam", metrics_by_trt[1])
         self.assertTrue(np.isfinite(metrics_by_trt[1]["hwam"]))
@@ -2498,8 +2505,8 @@ class TestConfigResolution(unittest.TestCase):
 
         self.assertIn('.venv\\Scripts\\python.exe', lint_script)
         self.assertIn('.venv\\Scripts\\python.exe', typecheck_script)
-        self.assertIn('throw "Project virtual environment not found:', lint_script)
-        self.assertIn('throw "Project virtual environment not found:', typecheck_script)
+        self.assertIn("Get-Command python -ErrorAction Stop", lint_script)
+        self.assertIn("Get-Command python -ErrorAction Stop", typecheck_script)
         self.assertIn('& $python -m ruff check src ..\\autoresearch_sandbox', lint_script)
         self.assertIn('& $python -m mypy src ..\\autoresearch_sandbox', typecheck_script)
 
@@ -4216,7 +4223,7 @@ class TestCaseRuntimeResolution(unittest.TestCase):
                 patch.object(run_model, "execute_treatment", side_effect=mutate_and_measure) as execute_treatment_mock,
                 patch.object(run_model, "_clear_output_files") as clear_outputs_mock,
             ):
-                metrics_by_trt = run_model.execute_case(
+                metrics_by_trt, treatment_calls = run_model.execute_case(
                     base,
                     live_filex,
                     cul_path,
@@ -4236,6 +4243,7 @@ class TestCaseRuntimeResolution(unittest.TestCase):
             rewrite_cul_mock.assert_called_once_with(cul_path, "CV01", runtime.input_plan.cul_updates)
             self.assertEqual(execute_treatment_mock.call_count, 2)
             self.assertEqual(clear_outputs_mock.call_count, 2)
+            self.assertEqual(treatment_calls, 2)
             self.assertEqual(metrics_by_trt, {1: {"hwam": 1.0}, 2: {"hwam": 2.0}})
             self.assertEqual(live_filex.read_text(encoding="utf-8"), "LIVE_ORIGINAL")
             self.assertEqual(cul_path.read_text(encoding="utf-8"), "CUL_ORIGINAL")
@@ -4435,6 +4443,82 @@ class TestCaseRuntimeResolution(unittest.TestCase):
                     "env_allow_missing": "true",
                 },
             )
+
+    def test_prepare_case_run_accepts_project_config_alias_and_paths_filex_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            dssat_dir = cwd / "case"
+            dssat_dir.mkdir(parents=True, exist_ok=True)
+            live_filex = dssat_dir / "SWSW7501.WHX"
+            live_filex.write_text("*X", encoding="utf-8")
+            cul_path = dssat_dir / "WHCER048.CUL"
+            cul_path.write_text("*C", encoding="utf-8")
+            params_path = cwd / "params.dat"
+            params_path.write_text("", encoding="utf-8")
+            runtime = CaseRuntime(
+                observation=ObservationRuntime(
+                    obs_a_path=dssat_dir / "SWSW7501.WHA",
+                    obs_wht_path=dssat_dir / "SWSW7501.WHT",
+                    wht_dates_by_trt={},
+                ),
+                output=OutputContract(var_codes=["HWAM"], t_vars=[], allow_missing_dates=False),
+                input_plan=CaseInputPlan(
+                    has_sh2o=False,
+                    sh2o_by_icbl={},
+                    cul_updates={},
+                    wth_updates=[],
+                    sol_updates=[],
+                    wth_path=None,
+                    sol_path=None,
+                ),
+            )
+            file_state = RuntimeFileState(
+                live_filex_path=live_filex,
+                live_filex_original="*X",
+                cul_path=cul_path,
+                cul_original="*C",
+                wth_path=None,
+                wth_original=None,
+                sol_path=None,
+                sol_original=None,
+            )
+            cfg_path = cwd / "project_live.json"
+            cfg_path.write_text(
+                json.dumps(
+                    {
+                        "paths": {
+                            "dssat_case_dir": str(dssat_dir),
+                            "live_filex": str(live_filex),
+                            "base_filex": str(live_filex),
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with (
+                patch.dict(os.environ, {"PEST_PROJECT_CONFIG": str(cfg_path), "DSSAT_TRTS": "1"}, clear=False),
+                patch.object(run_model, "_choose_case_dir", return_value=dssat_dir),
+                patch.object(run_model, "ensure_case_support_files"),
+                patch.object(run_model, "resolve_param_mapping", return_value=({}, {})),
+                patch.object(run_model, "resolve_cultivar_path", return_value=cul_path),
+                patch.object(run_model, "ensure_nonempty_cultivar_file"),
+                patch.object(run_model, "infer_cul_path_from_inp", return_value=None),
+                patch.object(
+                    run_model,
+                    "ensure_local_runtime",
+                    return_value=(Path("DSCSM048.EXE"), Path(r"d:\tmp\runtime\GENOTYPE")),
+                ),
+                patch.object(run_model, "_extract_cultivar_code", return_value="CV01"),
+                patch.object(run_model, "patch_cultivar_dir_in_inp_inh"),
+                patch.object(run_model, "resolve_case_runtime", return_value=runtime),
+                patch.object(run_model, "resolve_runtime_file_state", return_value=file_state),
+            ):
+                prepared = run_model.prepare_case_run(cwd)
+
+            self.assertEqual(prepared.base, live_filex)
+            self.assertEqual(prepared.live_filex, live_filex)
+            self.assertEqual(prepared.filex_name, "SWSW7501.WHX")
 
 
 class TestPestBuilderRunner(unittest.TestCase):
