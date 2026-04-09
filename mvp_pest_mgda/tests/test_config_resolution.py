@@ -5044,6 +5044,57 @@ class TestPestBuilderRunner(unittest.TestCase):
         self.assertEqual(env["DSSAT_ALLOW_MISSING_WHT_DATES"], "1")
         self.assertEqual(env["EXTRA_FLAG"], "5")
 
+    def test_run_build_pest_setup_updates_env_with_fresh_runtime_request_path(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_python_entrypoint(
+            python_executable: str,
+            script_path: Path,
+            cwd: Path,
+            env: dict[str, str],
+            failure_label: str,
+            args: list[str] | None = None,
+        ) -> object:
+            captured["env"] = dict(env)
+            captured["args"] = list(args or [])
+            return object()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            work_dir = Path(tmp)
+            script_path = work_dir / "build_pest_setup.py"
+            script_path.write_text("", encoding="utf-8")
+            env = {"AR_RUNTIME_REQUEST_PATH": r"d:\stale\request.json", "PROJECT_CONFIG": r"d:\cfg.json"}
+            with patch.object(core_pest_builder, "resolve_build_pest_setup_script", return_value=script_path):
+                with patch.object(core_pest_runner, "run_python_entrypoint", side_effect=fake_run_python_entrypoint):
+                    core_pest_builder.run_build_pest_setup(work_dir, env, python_executable="python-custom")
+
+            fresh_request_path = Path(str(env["AR_RUNTIME_REQUEST_PATH"]))
+            self.assertTrue(fresh_request_path.exists())
+            self.assertEqual(captured["args"], ["--runtime-request", str(fresh_request_path)])
+            self.assertEqual(captured["env"]["AR_RUNTIME_REQUEST_PATH"], str(fresh_request_path))
+
+    def test_acquire_cultivar_lock_removes_stale_old_lock_even_if_pid_is_alive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cul_path = Path(tmp) / "SBGRO048.CUL"
+            cul_path.write_text("DUMMY", encoding="utf-8")
+            lock_path = cul_path.with_suffix(".CUL.lock")
+            lock_path.write_text("12345", encoding="utf-8")
+            old_time = time.time() - 3600.0
+            os.utime(lock_path, (old_time, old_time))
+
+            with patch.object(run_model, "_pid_is_alive", return_value=True):
+                acquired = run_model._acquire_cultivar_lock(
+                    cul_path,
+                    timeout_s=1.0,
+                    poll_s=0.01,
+                    stale_lock_age_s=1.0,
+                )
+
+            self.assertEqual(acquired, lock_path)
+            self.assertEqual(lock_path.read_text(encoding="utf-8").strip(), str(os.getpid()))
+            run_model._release_cultivar_lock(lock_path)
+            self.assertFalse(lock_path.exists())
+
     def test_run_manifest_and_contract_report_merge_json_payloads(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             work_dir = Path(tmp)

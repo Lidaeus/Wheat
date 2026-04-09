@@ -352,6 +352,13 @@ def _read_lock_pid(lock_path: Path) -> int | None:
     return pid if pid > 0 else None
 
 
+def _lock_age_seconds(lock_path: Path) -> float | None:
+    try:
+        return max(0.0, time.time() - float(lock_path.stat().st_mtime))
+    except Exception:
+        return None
+
+
 def _pid_is_alive(pid: int) -> bool:
     try:
         os.kill(int(pid), 0)
@@ -364,7 +371,12 @@ def _pid_is_alive(pid: int) -> bool:
     return True
 
 
-def _acquire_cultivar_lock(cul_path: Path, timeout_s: float = 300.0, poll_s: float = 0.2) -> Path:
+def _acquire_cultivar_lock(
+    cul_path: Path,
+    timeout_s: float = 300.0,
+    poll_s: float = 0.2,
+    stale_lock_age_s: float = 120.0,
+) -> Path:
     lock_path = cul_path.with_suffix(cul_path.suffix + ".lock")
     deadline = time.time() + float(timeout_s)
     while True:
@@ -375,7 +387,11 @@ def _acquire_cultivar_lock(cul_path: Path, timeout_s: float = 300.0, poll_s: flo
             return lock_path
         except FileExistsError:
             owner_pid = _read_lock_pid(lock_path)
+            lock_age = _lock_age_seconds(lock_path)
             if owner_pid is not None and not _pid_is_alive(owner_pid):
+                _try_unlink(lock_path, tries=3, sleep_s=0.05)
+                continue
+            if lock_age is not None and lock_age >= float(stale_lock_age_s):
                 _try_unlink(lock_path, tries=3, sleep_s=0.05)
                 continue
             if time.time() >= deadline:

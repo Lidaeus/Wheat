@@ -274,6 +274,7 @@ def run_build_pest_setup(
         purpose="build_pest_setup",
         script_path=resolved_script_path,
     )
+    env["AR_RUNTIME_REQUEST_PATH"] = str(request_path)
 
     return run_python_entrypoint(
         python_executable or sys.executable,
