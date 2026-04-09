@@ -1,0 +1,34 @@
+{
+  "run_id": "W0_O1_S1_G1_wheat_rep0_abcdef",
+  "crop": "wheat",
+  "requested": {
+    "weight": "w0_raw_identity",
+    "engine": "o6_pestpp_glm",
+    "sequence": "s1_naive_joint",
+    "grouping": "g1_flat_all_in_one"
+  },
+  "resolved": {
+    "weight": "w0_raw_identity",
+    "engine": "o6_pestpp_glm",
+    "sequence": "s1_naive_joint",
+    "grouping": "g1_flat_all_in_one"
+  },
+  "paths": {
+    "runtime_dir": "__WORKSPACE__",
+    "case_dir": "__CASE_DIR__",
+    "project_config_path": "__PROJECT_CONFIG__"
+  },
+  "scenario": {
+    "filex_name": "SAMPLE.WHX",
+    "trts": [
+      1
+    ]
+  },
+  "summary": {
+    "active_groups": [
+      "obs_yield"
+    ],
+    "fallback_count": 1,
+    "zero_weight_count": 1
+  }
+}

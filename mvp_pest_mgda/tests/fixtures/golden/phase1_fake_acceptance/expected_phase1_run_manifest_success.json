@@ -1,0 +1,21 @@
+{
+  "created_at": "__TIMESTAMP__",
+  "batch": "BatchD",
+  "budget": "standard",
+  "workers": 1,
+  "repetitions": 1,
+  "crops": [
+    "Wheat"
+  ],
+  "combo_keys": [
+    "W0_O1_S1_G1",
+    "W1_O1_S2_G3",
+    "W4_O2_S2_G3",
+    "W6_O1_S2_G3",
+    "W7_O1_S2_G3",
+    "W8_O1_S2_G3"
+  ],
+  "train_only": true,
+  "job_count": 6,
+  "skipped_crops": {}
+}
