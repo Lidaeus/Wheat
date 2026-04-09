@@ -164,6 +164,29 @@ def python_executable() -> str:
     return sys.executable
 
 
+def resolve_pestpp_env() -> dict[str, str]:
+    env_updates: dict[str, str] = {"PESTPP_ROOT": str(MVP_ROOT)}
+    glm_candidates = [
+        MVP_ROOT / "pestpp-glm.exe",
+        MVP_ROOT / "bin" / "pestpp-glm.exe",
+        MVP_ROOT / "vendor" / "pestpp_5.2.16_iwin" / "bin" / "pestpp-glm.exe",
+    ]
+    ies_candidates = [
+        MVP_ROOT / "pestpp-ies.exe",
+        MVP_ROOT / "bin" / "pestpp-ies.exe",
+        MVP_ROOT / "vendor" / "pestpp_5.2.16_iwin" / "bin" / "pestpp-ies.exe",
+    ]
+    for candidate in glm_candidates:
+        if candidate.exists():
+            env_updates["PESTPP_GLM"] = str(candidate)
+            break
+    for candidate in ies_candidates:
+        if candidate.exists():
+            env_updates["PESTPP_IES"] = str(candidate)
+            break
+    return env_updates
+
+
 def strategy_source_for_weight(weight_code: str) -> str:
     return BENCHMARK_STRATEGIES.get(weight_code, CURRENT_STRATEGY_SOURCE)
 
@@ -365,6 +388,7 @@ def run_job(job: dict, session_root: Path) -> dict:
         env["DSSAT_SKIP_TASKKILL"] = "1"
         env["AR_MVP_ROOT"] = str(MVP_ROOT)
         env["PEST_RUN_MODEL_PYTHON"] = python_executable()
+        env.update(resolve_pestpp_env())
         env["AR_FORCE_TRAIN_ONLY"] = "1" if job.get("train_only", True) else "0"
         if job.get("baseline_source"):
             env["AR_BASELINE_PARAM_SOURCE"] = str(job["baseline_source"])

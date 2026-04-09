@@ -338,6 +338,32 @@ def _try_unlink(path: Path, tries: int = 10, sleep_s: float = 0.1) -> None:
     return
 
 
+def _read_lock_pid(lock_path: Path) -> int | None:
+    try:
+        raw = lock_path.read_text(encoding="utf-8", errors="ignore").strip()
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        pid = int(raw)
+    except Exception:
+        return None
+    return pid if pid > 0 else None
+
+
+def _pid_is_alive(pid: int) -> bool:
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except Exception:
+        return True
+    return True
+
+
 def _acquire_cultivar_lock(cul_path: Path, timeout_s: float = 300.0, poll_s: float = 0.2) -> Path:
     lock_path = cul_path.with_suffix(cul_path.suffix + ".lock")
     deadline = time.time() + float(timeout_s)
@@ -348,6 +374,10 @@ def _acquire_cultivar_lock(cul_path: Path, timeout_s: float = 300.0, poll_s: flo
             os.close(handle)
             return lock_path
         except FileExistsError:
+            owner_pid = _read_lock_pid(lock_path)
+            if owner_pid is not None and not _pid_is_alive(owner_pid):
+                _try_unlink(lock_path, tries=3, sleep_s=0.05)
+                continue
             if time.time() >= deadline:
                 raise TimeoutError(f"Timed out waiting for cultivar lock: {lock_path}")
             time.sleep(float(poll_s))
@@ -812,14 +842,14 @@ def prepare_case_run(cwd: Path | None = None) -> PreparedCaseRun:
         env_dssat_exe=os.environ.get("DSSAT_EXE", ""),
     )
     cfg.setdefault("paths", {})["dssat_exe"] = str(runtime_exe)
-    runtime_cul_path = fallback_root_cul
+    runtime_cul_path = runtime_genotype / cul_path.name
     cultivar_code = _extract_cultivar_code(live_filex)
 
     case_dirs_to_patch = [dssat_dir]
     local_case_dir = (run_cwd / "dssat_case").resolve()
     if local_case_dir.exists():
         case_dirs_to_patch.append(local_case_dir)
-    _patch_case_support_dirs(case_dirs_to_patch, fallback_root_cul.parent)
+    _patch_case_support_dirs(case_dirs_to_patch, runtime_genotype)
     case_runtime = resolve_case_runtime(
         dssat_dir,
         cfg,

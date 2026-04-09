@@ -141,6 +141,15 @@ class TestPhase1RunnerOffline(unittest.TestCase):
 
             with (
                 patch.object(phase1_runner, "python_executable", return_value="python"),
+                patch.object(
+                    phase1_runner,
+                    "resolve_pestpp_env",
+                    return_value={
+                        "PESTPP_ROOT": "D:\\portable\\mvp_pest_mgda",
+                        "PESTPP_GLM": "D:\\portable\\mvp_pest_mgda\\bin\\pestpp-glm.exe",
+                        "PESTPP_IES": "D:\\portable\\mvp_pest_mgda\\bin\\pestpp-ies.exe",
+                    },
+                ),
                 patch.object(phase1_runner.subprocess, "run", side_effect=fake_subprocess_run),
             ):
                 result = phase1_runner.run_job(job, session_root)
@@ -166,6 +175,9 @@ class TestPhase1RunnerOffline(unittest.TestCase):
             self.assertEqual(env["AR_FORCE_TRAIN_ONLY"], "0")
             self.assertEqual(env["AR_BASELINE_PARAM_SOURCE"], "external")
             self.assertEqual(env["DSSAT_CASE_DIR"], str(workspace_dir / "dssat_case"))
+            self.assertEqual(env["PESTPP_ROOT"], "D:\\portable\\mvp_pest_mgda")
+            self.assertTrue(env["PESTPP_GLM"].endswith("pestpp-glm.exe"))
+            self.assertTrue(env["PESTPP_IES"].endswith("pestpp-ies.exe"))
 
     def test_run_job_marks_failure_and_writes_logs_when_eval_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

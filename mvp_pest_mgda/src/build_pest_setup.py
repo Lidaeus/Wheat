@@ -235,6 +235,42 @@ def _prepare_parameter_bounds(cwd: Path, project_root: Path, cfg: dict) -> list[
     return report_rows
 
 
+def _read_pest_out_keys(path: Path) -> set[str]:
+    keys: set[str] = set()
+    if not path.exists():
+        return keys
+    for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        try:
+            float(parts[1])
+        except ValueError:
+            continue
+        keys.add(parts[0].strip().lower())
+    return keys
+
+
+def _has_summary_metric_key(sim_keys: set[str], metric_code: str, trts: list[int]) -> bool:
+    prefix = f"{str(metric_code).strip().lower()}_t"
+    for trt in trts:
+        if f"{prefix}{int(trt):02d}" in sim_keys:
+            return True
+    return False
+
+
+def _filter_wht_dates_by_sim_keys(sim_keys: set[str], wht_dates_by_trt: dict[int, list[int]]) -> dict[int, list[int]]:
+    filtered: dict[int, list[int]] = {}
+    for trt, dates in wht_dates_by_trt.items():
+        kept = [int(date) for date in dates if f"laid_t{int(trt):02d}_d{int(date)}" in sim_keys]
+        if kept:
+            filtered[int(trt)] = kept
+    return filtered
+
+
 def _resolve_split(cfg: dict, trts: list[int]) -> dict[int, str]:
     split_cfg = cfg.get("split", {})
     mode = str(split_cfg.get("mode", "trt")).strip().lower()
@@ -1268,7 +1304,6 @@ def main() -> None:
     )
 
     (cwd / "dssat_trts.txt").write_text(",".join([str(int(t)) for t in trts]) + "\n", encoding="utf-8")
-    _write_pest_out_ins(cwd / "pest_out.ins", trts, summary_metrics, wht_dates_by_trt, wht_second)
 
     # Multi-start seeding (LHS)
     mgda_cfg = cfg.get("optimization", {}).get("mgda", {})
@@ -1372,6 +1407,12 @@ def main() -> None:
         extra_env=env,
         failure_label="build_pest_setup run_model.py",
     )
+    sim_keys = _read_pest_out_keys(cwd / "pest_out.dat")
+    summary_metrics = [code for code in summary_metrics if _has_summary_metric_key(sim_keys, code, trts)]
+    wht_dates_by_trt = _filter_wht_dates_by_sim_keys(sim_keys, wht_dates_by_trt)
+    a_meas = {key: value for key, value in a_meas.items() if key in sim_keys}
+    wht_meas = {key: value for key, value in wht_meas.items() if key in sim_keys}
+    _write_pest_out_ins(cwd / "pest_out.ins", trts, summary_metrics, wht_dates_by_trt, wht_second)
     meas = dict(a_meas)
     meas.update(wht_meas)
 

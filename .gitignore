@@ -39,10 +39,12 @@ EXP.LST
 run.info
 
 *.exe
+!mvp_pest_mgda/vendor/**/*.exe
 *.zip
 *.tar.gz
 
 pestpp_*/
+!mvp_pest_mgda/vendor/pestpp_*/
 _runtime_probe/
 local_dssat/
 autoresearch_sandbox/artifacts/

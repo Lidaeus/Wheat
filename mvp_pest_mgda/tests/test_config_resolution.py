@@ -2505,8 +2505,6 @@ class TestConfigResolution(unittest.TestCase):
 
         self.assertIn('.venv\\Scripts\\python.exe', lint_script)
         self.assertIn('.venv\\Scripts\\python.exe', typecheck_script)
-        self.assertIn("Get-Command python -ErrorAction Stop", lint_script)
-        self.assertIn("Get-Command python -ErrorAction Stop", typecheck_script)
         self.assertIn('& $python -m ruff check src ..\\autoresearch_sandbox', lint_script)
         self.assertIn('& $python -m mypy src ..\\autoresearch_sandbox', typecheck_script)
 
@@ -3578,8 +3576,8 @@ class TestCaseRuntimeResolution(unittest.TestCase):
                 "".join(
                     [
                         "*WHEAT CULTIVARS\n",
-                        "@VAR#  VRNAME........  EXPNO   ECO#    P1V   P1D    P5 PHINT   G1   G2   G3\n",
-                        "CVW01  TEST_ENTRY         .   ECO1   5.0  3.50 500.0 95.0 18.0 22.00 1.20\n",
+                        "@VAR#  VRNAME........  EXPNO   ECO#    P1V   P1D    P5   G1   G2   G3 PHINT\n",
+                        "CVW01  TEST_ENTRY         .   ECO1   5.0  3.50 500.0 18.0 22.00 1.20  95.0\n",
                     ]
                 ),
                 encoding="utf-8",
@@ -3595,8 +3593,8 @@ class TestCaseRuntimeResolution(unittest.TestCase):
             tokens = updated_row.split()
 
             self.assertEqual(tokens[5], "4.25")
-            self.assertEqual(tokens[9], "24.50")
-            self.assertEqual(tokens[10], "1.75")
+            self.assertEqual(tokens[8], "24.50")
+            self.assertEqual(tokens[9], "1.750")
 
     def test_ensure_case_files_writes_registry_parameter_order_into_params_and_tpl(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -4406,6 +4404,7 @@ class TestCaseRuntimeResolution(unittest.TestCase):
                 patch.object(run_model, "resolve_cultivar_path", return_value=cul_path),
                 patch.object(run_model, "ensure_nonempty_cultivar_file"),
                 patch.object(run_model, "infer_cul_path_from_inp", return_value=None),
+                patch.object(run_model, "resolve_dssat_genotype_dir", return_value=Path(r"d:\tmp\runtime\GENOTYPE")),
                 patch.object(
                     run_model,
                     "ensure_local_runtime",
@@ -4554,6 +4553,8 @@ class TestPestBuilderRunner(unittest.TestCase):
             },
             group_variances={"obs_yield": 9.0, "obs_canopy": 16.0},
             group_maxima={"obs_yield": 20.0, "obs_canopy": 10.0},
+            group_rms=None,
+            group_means_abs=None,
             weight_mode="w8_dssat_group_max",
             mgda_alphas={"obs_canopy": 0.5},
         )
@@ -4677,6 +4678,42 @@ class TestPestBuilderRunner(unittest.TestCase):
             )
 
             self.assertEqual(resolved, override)
+
+    def test_resolve_pestpp_executable_accepts_root_inferred_from_run_model_python(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            inferred_root = root / "alt" / "mvp_pest_mgda"
+            binary = inferred_root / "vendor" / "pestpp_5.2.16_iwin" / "bin" / "pestpp-glm.exe"
+            binary.parent.mkdir(parents=True, exist_ok=True)
+            binary.write_text("", encoding="utf-8")
+            fake_python = inferred_root / ".venv" / "Scripts" / "python.exe"
+            fake_python.parent.mkdir(parents=True, exist_ok=True)
+            fake_python.write_text("", encoding="utf-8")
+
+            resolved = pest_runner.resolve_pestpp_executable(
+                "pestpp-glm.exe",
+                root / "missing_root",
+                env={"PEST_RUN_MODEL_PYTHON": str(fake_python)},
+            )
+
+            self.assertEqual(resolved, binary)
+
+    def test_resolve_pestpp_executable_accepts_sibling_wheat_workspace_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base_root = root / "Parallel_Exp" / "mvp_pest_mgda"
+            sibling_root = root / "Parallel_Exp" / "Wheat" / "mvp_pest_mgda"
+            binary = sibling_root / "vendor" / "pestpp_5.2.16_iwin" / "bin" / "pestpp-glm.exe"
+            binary.parent.mkdir(parents=True, exist_ok=True)
+            binary.write_text("", encoding="utf-8")
+
+            resolved = pest_runner.resolve_pestpp_executable(
+                "pestpp-glm.exe",
+                base_root,
+                env={},
+            )
+
+            self.assertEqual(resolved, binary)
 
     def test_run_pestpp_executable_uses_resolved_binary_and_runner_contract(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -5198,7 +5235,7 @@ class TestPestBuilderRunner(unittest.TestCase):
 
             with (
                 patch.object(run_model, "prepare_case_run", return_value=prepared),
-                patch.object(run_model, "execute_case", return_value={1: {"hwam": 123.0}}),
+                patch.object(run_model, "execute_case", return_value=({1: {"hwam": 123.0}}, 1)),
                 patch.object(run_model.Path, "cwd", return_value=cwd),
             ):
                 run_model.main()

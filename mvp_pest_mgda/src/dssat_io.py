@@ -708,9 +708,9 @@ def rewrite_cul_values(cul_path: Path, cultivar_code: str, updates: dict[str, fl
                 row_matches = list(re.finditer(r"\S+", row_text))
 
             col_to_span: dict[str, tuple[int, int]] = {}
-            for idx, (col, match) in enumerate(zip(header_cols, row_matches)):
+            for col, match in zip(header_cols, row_matches):
                 start = int(match.start())
-                end = int(row_matches[idx + 1].start()) if idx + 1 < len(row_matches) else len(row_text)
+                end = int(match.end())
                 col_to_span[str(col).strip().upper()] = (start, end)
             
             row_chars = list(row_text)

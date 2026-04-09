@@ -368,16 +368,48 @@ def resolve_pestpp_executable(
     env_map = env or {}
     env_key = "PESTPP_IES" if str(exe_name).strip().lower() == "pestpp-ies.exe" else "PESTPP_GLM"
     configured = str(env_map.get(env_key, "")).strip()
+    root_candidates: list[Path] = [pestpp_root]
+    configured_root = str(env_map.get("PESTPP_ROOT", "")).strip()
+    if configured_root:
+        root_candidates.append(Path(configured_root))
+    ar_mvp_root = str(env_map.get("AR_MVP_ROOT", "")).strip()
+    if ar_mvp_root:
+        root_candidates.append(Path(ar_mvp_root))
+    run_model_python = str(env_map.get("PEST_RUN_MODEL_PYTHON", "")).strip()
+    if run_model_python:
+        py_path = Path(run_model_python)
+        for parent in py_path.parents:
+            if parent.name.lower() == "mvp_pest_mgda":
+                root_candidates.append(parent)
+                break
+    sibling_workspace_root = pestpp_root.parent / "Wheat" / pestpp_root.name
+    root_candidates.append(sibling_workspace_root)
+    dssat_root_raw = str(env_map.get("DSSAT_ROOT", "")).strip() or r"C:\DSSAT48"
+    dssat_root = Path(dssat_root_raw)
+    root_candidates.append(dssat_root / pestpp_root.name)
+    root_candidates.append(dssat_root / "Wheat" / pestpp_root.name)
+    deduped_roots: list[Path] = []
+    seen_roots: set[Path] = set()
+    for root in root_candidates:
+        try:
+            key = root.resolve(strict=False)
+        except Exception:
+            key = root
+        if key in seen_roots:
+            continue
+        seen_roots.add(key)
+        deduped_roots.append(root)
     candidates: list[Path] = []
     if configured:
         candidates.append(Path(configured))
-    candidates.extend(
-        [
-            pestpp_root / exe_name,
-            pestpp_root / "bin" / exe_name,
-            pestpp_root / "vendor" / "pestpp_5.2.16_iwin" / "bin" / exe_name,
-        ]
-    )
+    for root in deduped_roots:
+        candidates.extend(
+            [
+                root / exe_name,
+                root / "bin" / exe_name,
+                root / "vendor" / "pestpp_5.2.16_iwin" / "bin" / exe_name,
+            ]
+        )
     for candidate in candidates:
         if candidate.exists():
             return candidate
