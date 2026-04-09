@@ -3386,21 +3386,25 @@ class TestCaseRuntimeResolution(unittest.TestCase):
         self.assertEqual(cul_name, "WHCER048.CUL")
         self.assertEqual(cul_dir, "C:\\DSSAT48\\Genotype\\")
 
-    def test_infer_cul_path_from_inp_prefers_local_genotype_copy(self) -> None:
+    def test_infer_cul_path_from_inp_prefers_inp_source_path_when_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             dssat_dir = Path(tmp)
             genotype_dir = dssat_dir / "GENOTYPE"
             genotype_dir.mkdir(parents=True, exist_ok=True)
             local_cul = genotype_dir / "WHCER048.CUL"
             local_cul.write_text("LOCAL", encoding="utf-8")
+            src_dir = dssat_dir / "src_genotype"
+            src_dir.mkdir(parents=True, exist_ok=True)
+            source_cul = src_dir / "WHCER048.CUL"
+            source_cul.write_text("SOURCE", encoding="utf-8")
             (dssat_dir / "DSSAT48.INP").write_text(
-                "CULTIVAR     WHCER048.CUL     C:\\DSSAT48\\Genotype\\\n",
+                f"CULTIVAR     WHCER048.CUL     {str(src_dir)}\\\n",
                 encoding="utf-8",
             )
 
             inferred = infer_cul_path_from_inp(dssat_dir, {})
 
-            self.assertEqual(inferred, local_cul)
+            self.assertEqual(inferred, source_cul)
 
     def test_resolve_cultivar_path_precedence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3595,6 +3599,51 @@ class TestCaseRuntimeResolution(unittest.TestCase):
             self.assertEqual(tokens[5], "4.25")
             self.assertEqual(tokens[8], "24.50")
             self.assertEqual(tokens[9], "1.750")
+
+    def test_rewrite_cul_values_handles_vrname_with_spaces_without_column_shift(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cul_path = Path(tmp) / "SBGRO048.CUL"
+            cul_path.write_text(
+                "".join(
+                    [
+                        "*SOYBEAN CULTIVARS\n",
+                        "@VAR#  VAR-NAME........ EXPNO   ECO#  CSDL PPSEN EM-FL FL-SH FL-SD SD-PM FL-LF LFMAX SLAVR SIZLF  XFRT WTPSD SFDUR SDPDV PODUR THRSH SDPRO SDLIP\n",
+                        "IB0002 COBB (8)             . SB0801 12.07 0.330  21.0   9.4  16.0 37.20 19.00 1.400   393 199.6  1.28 0.191  20.8  2.13   6.6  81.8  0.47  0.34\n",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            dssat_io.rewrite_cul_values(cul_path, "IB0002", {"SLAVR": 387.5, "SDPDV": 2.2, "em_fl": 18.9})
+
+            updated_row = cul_path.read_text(encoding="utf-8").splitlines()[2]
+            self.assertIn("COBB (8)", updated_row)
+            self.assertIn(" 388 ", updated_row)
+            self.assertIn(" 2.20", updated_row)
+            self.assertIn("18.9", updated_row)
+            self.assertIn("1.400", updated_row)
+
+    def test_parse_cul_header_and_row_handles_vrname_with_spaces(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cul_path = Path(tmp) / "COGRO048.CUL"
+            cul_path.write_text(
+                "".join(
+                    [
+                        "*COTTON CULTIVARS\n",
+                        "@VAR#  VRNAME.......... EXPNO   ECO#  CSDL PPSEN EM-FL FL-SH FL-SD SD-PM FL-LF LFMAX SLAVR SIZLF  XFRT WTPSD SFDUR SDPDV PODUR THRSH SDPRO SDLIP\n",
+                        "IB0001 Deltapine 77         2 CO0001 23.00  0.01  34.0   8.0  15.0 49.00 75.00  1.12   170 250.0  0.73 0.180  32.7 27.00    12  74.0  0.15  0.12\n",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            cols, values = dssat_io._parse_cul_header_and_row(cul_path, "IB0001")
+
+            self.assertIn("LFMAX", cols)
+            self.assertIn("SLAVR", cols)
+            self.assertAlmostEqual(values["LFMAX"], 1.12, places=6)
+            self.assertAlmostEqual(values["SLAVR"], 170.0, places=6)
+            self.assertAlmostEqual(values["SDPDV"], 27.0, places=6)
 
     def test_ensure_case_files_writes_registry_parameter_order_into_params_and_tpl(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

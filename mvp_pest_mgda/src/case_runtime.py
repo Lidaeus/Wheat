@@ -243,16 +243,18 @@ def parse_inp_cultivar_reference(lines: list[str]) -> tuple[str | None, str | No
     cul_file_name = None
     cul_src_dir = None
     for raw in lines:
-        if not raw.startswith("CULTIVAR"):
+        line = raw.replace("\x00", "").strip()
+        if not line.startswith("CULTIVAR"):
             continue
-        if ".CUL" not in raw.upper():
+        if ".CUL" not in line.upper():
             continue
-        for token in raw.split():
+        for token in line.split():
             if token.upper().endswith(".CUL"):
                 cul_file_name = token.strip()
                 break
-        if "C:\\" in raw:
-            cul_src_dir = raw[raw.index("C:\\") :].strip()
+        path_match = re.search(r"[A-Za-z]:\\.*", line)
+        if path_match:
+            cul_src_dir = path_match.group(0).strip()
         break
     return cul_file_name, cul_src_dir
 
@@ -270,12 +272,6 @@ def infer_cul_path_from_inp(dssat_dir: Path, cfg: dict) -> Path | None:
         inp_path.read_text(encoding="utf-8", errors="ignore").splitlines()
     )
 
-    geno_dir = dssat_dir / "GENOTYPE"
-    if cul_file_name and geno_dir.exists():
-        in_case = geno_dir / cul_file_name
-        if in_case.exists():
-            return in_case
-
     if cul_src_dir and cul_file_name:
         try:
             src = (Path(cul_src_dir) / cul_file_name).resolve()
@@ -283,6 +279,12 @@ def infer_cul_path_from_inp(dssat_dir: Path, cfg: dict) -> Path | None:
             return None
         if src.exists():
             return src
+
+    geno_dir = dssat_dir / "GENOTYPE"
+    if cul_file_name and geno_dir.exists():
+        in_case = geno_dir / cul_file_name
+        if in_case.exists():
+            return in_case
 
     return None
 

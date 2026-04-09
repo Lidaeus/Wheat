@@ -908,6 +908,10 @@ def prepare_case_run(cwd: Path | None = None) -> PreparedCaseRun:
     if local_case_dir.exists():
         case_dirs_to_patch.append(local_case_dir)
     _patch_case_support_dirs(case_dirs_to_patch, runtime_genotype)
+    active_inferred_cul = infer_cul_path_from_inp(dssat_dir, cfg)
+    cul_path_for_run = runtime_cul_path
+    if active_inferred_cul is not None and active_inferred_cul.exists():
+        cul_path_for_run = active_inferred_cul
     case_runtime = resolve_case_runtime(
         dssat_dir,
         cfg,
@@ -919,7 +923,7 @@ def prepare_case_run(cwd: Path | None = None) -> PreparedCaseRun:
         env_extra_summary_vars=os.environ.get("DSSAT_EXTRA_SUMMARY_VARS", ""),
         env_allow_missing=os.environ.get("DSSAT_ALLOW_MISSING_WHT_DATES", ""),
     )
-    file_state = resolve_runtime_file_state(live_filex, runtime_cul_path, case_runtime.input_plan)
+    file_state = resolve_runtime_file_state(live_filex, cul_path_for_run, case_runtime.input_plan)
     return PreparedCaseRun(
         cfg=cfg,
         project_config_path=project_config_path,
@@ -931,7 +935,7 @@ def prepare_case_run(cwd: Path | None = None) -> PreparedCaseRun:
         keep_outputs=keep_outputs,
         base=base,
         live_filex=live_filex,
-        cul_path=runtime_cul_path,
+        cul_path=cul_path_for_run,
         cultivar_code=cultivar_code,
         trts_env=trts_env,
     )

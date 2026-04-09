@@ -629,15 +629,14 @@ def rewrite_cul_values(cul_path: Path, cultivar_code: str, updates: dict[str, fl
         return
 
     header_cols: list[str] | None = None
-    fixed_numeric_order = ["P1V", "P1D", "P5", "G1", "G2", "G3", "PHINT"]
     fixed_numeric_formats = {
-        "P1V": (6, 3),
-        "P1D": (6, 2),
-        "P5": (6, 1),
-        "G1": (6, 2),
-        "G2": (6, 2),
-        "G3": (6, 3),
-        "PHINT": (6, 2),
+        "P1V": 3,
+        "P1D": 2,
+        "P5": 1,
+        "G1": 2,
+        "G2": 2,
+        "G3": 3,
+        "PHINT": 2,
     }
 
     def _line_ending(raw: str) -> str:
@@ -647,23 +646,70 @@ def rewrite_cul_values(cul_path: Path, cultivar_code: str, updates: dict[str, fl
             return "\n"
         return ""
 
-    def _format_fixed_numeric(col_name: str, value: float) -> str:
-        width, decimals = fixed_numeric_formats[col_name]
-        out = f"{float(value):>{width}.{decimals}f}"
+    def _format_fixed_numeric(col_name: str, value: float, width: int) -> str:
+        decimals = fixed_numeric_formats[col_name]
+        out = f"{float(value):.{decimals}f}"
         if len(out) > width:
             raise ValueError(f"Value {value} for {col_name} exceeds DSSAT width {width}")
-        return out
+        return out.ljust(width)
 
     def _format_like_existing(existing_text: str, width: int, value: float) -> str:
+        trailing_spaces = len(existing_text) - len(existing_text.rstrip(" "))
+        core_width = max(1, width - trailing_spaces)
         s = existing_text.strip()
         if "." in s:
             decimals = len(s.split(".", 1)[1])
-            out = f"{float(value):>{width}.{decimals}f}"
+            out = ""
+            for decimals_try in range(decimals, -1, -1):
+                candidate = f"{float(value):>{core_width}.{decimals_try}f}"
+                if len(candidate) <= core_width:
+                    out = candidate
+                    break
+            if not out:
+                out = f"{int(round(float(value))):>{core_width}d}"
         else:
-            out = f"{int(round(float(value))):>{width}d}"
+            out = ""
+            for decimals_try in (3, 2, 1):
+                candidate = f"{float(value):>{core_width}.{decimals_try}f}"
+                if len(candidate) <= core_width:
+                    out = candidate
+                    break
+            if not out:
+                out = f"{int(round(float(value))):>{core_width}d}"
+        out = out + (" " * trailing_spaces)
         if len(out) > width:
             raise ValueError(f"Value {value} exceeds DSSAT width {width} for column '{s}'")
         return out
+
+    def _build_row_spans(cols: list[str], row_text: str) -> dict[str, tuple[int, int]]:
+        matches = list(re.finditer(r"\S+", row_text))
+        spans: dict[str, tuple[int, int]] = {}
+        if not cols or not matches:
+            return spans
+        if len(cols) == 1:
+            spans[cols[0]] = (int(matches[0].start()), len(row_text))
+            return spans
+        if len(matches) >= len(cols):
+            spans[cols[0]] = (int(matches[0].start()), int(matches[0].end()))
+            tail_cols = cols[2:]
+            if tail_cols:
+                tail_matches = matches[-len(tail_cols) :]
+                spans[cols[1]] = (int(matches[0].end()), int(tail_matches[0].start()))
+                for i, col in enumerate(tail_cols):
+                    start = int(tail_matches[i].start())
+                    end = int(tail_matches[i + 1].start()) if i + 1 < len(tail_matches) else len(row_text)
+                    spans[col] = (start, end)
+            else:
+                spans[cols[1]] = (int(matches[0].end()), len(row_text))
+            return spans
+        for i, col in enumerate(cols[: len(matches)]):
+            start = int(matches[i].start())
+            end = int(matches[i + 1].start()) if i + 1 < len(matches) else len(row_text)
+            spans[col] = (start, end)
+        return spans
+
+    def _normalize_col_key(name: str) -> str:
+        return re.sub(r"[^A-Z0-9]", "", str(name).strip().upper())
 
     out_lines: list[str] = []
     updated = False
@@ -680,51 +726,48 @@ def rewrite_cul_values(cul_path: Path, cultivar_code: str, updates: dict[str, fl
         if header_cols and line.startswith(cultivar_code):
             row_text = line.rstrip("\r\n")
             ending = _line_ending(line)
-            
-            row_matches = list(re.finditer(r"\S+", row_text))
-            if len(row_matches) < len(header_cols):
-                out_lines.append(line)
-                continue
-
-            row_tokens = [match.group(0) for match in row_matches[: len(header_cols)]]
-            row_by_col = {str(col).strip().upper(): row_tokens[idx] for idx, col in enumerate(header_cols)}
+            row_spans = _build_row_spans(header_cols, row_text)
+            col_lookup: dict[str, str] = {}
+            for col_name in row_spans.keys():
+                col_lookup[_normalize_col_key(col_name)] = col_name
+            resolved_updates: dict[str, float] = {}
+            for raw_name, new_val in updates_u.items():
+                resolved_name = col_lookup.get(_normalize_col_key(raw_name))
+                if resolved_name:
+                    resolved_updates[resolved_name] = float(new_val)
 
             fixed_cols_applied: set[str] = set()
-            can_use_fixed_numeric_template = all(col in row_by_col for col in fixed_numeric_order)
-            if can_use_fixed_numeric_template and any(col in updates_u for col in fixed_numeric_order):
-                first_numeric_col = fixed_numeric_order[0]
-                first_numeric_idx = header_cols.index(first_numeric_col)
-                numeric_start = row_matches[first_numeric_idx].start()
-                prefix = row_text[:numeric_start]
-                trailing = row_text[row_matches[-1].end():]
-                numeric_values = {
-                    col: float(row_by_col[col]) if col in row_by_col else 0.0
-                    for col in fixed_numeric_order
-                }
-                for col_name, new_val in updates_u.items():
-                    if col_name in numeric_values:
-                        numeric_values[col_name] = float(new_val)
-                        fixed_cols_applied.add(col_name)
-                numeric_block = "".join(_format_fixed_numeric(col, numeric_values[col]) for col in fixed_numeric_order)
-                row_text = prefix + numeric_block + trailing
-                row_matches = list(re.finditer(r"\S+", row_text))
-
-            col_to_span: dict[str, tuple[int, int]] = {}
-            for col, match in zip(header_cols, row_matches):
-                start = int(match.start())
-                end = int(match.end())
-                col_to_span[str(col).strip().upper()] = (start, end)
-            
             row_chars = list(row_text)
-            for col_name, new_val in updates_u.items():
+            for col_name, new_val in resolved_updates.items():
+                if col_name not in fixed_numeric_formats:
+                    continue
+                span = row_spans.get(col_name)
+                if span is None:
+                    continue
+                a, b = span
+                width = b - a
+                try:
+                    formatted = _format_fixed_numeric(col_name, new_val, width)
+                except ValueError:
+                    continue
+                if b > len(row_chars):
+                    row_chars.extend([" "] * (b - len(row_chars)))
+                row_chars[a:b] = list(formatted)
+                fixed_cols_applied.add(col_name)
+
+            for col_name, new_val in resolved_updates.items():
                 if col_name in fixed_cols_applied:
                     continue
-                if col_name in col_to_span:
-                    a, b = col_to_span[col_name]
-                    width = b - a
-                    existing = "".join(row_chars[a:b])
-                    formatted = _format_like_existing(existing, width, new_val)
-                    row_chars[a:b] = list(formatted)
+                span = row_spans.get(col_name)
+                if span is None:
+                    continue
+                a, b = span
+                width = b - a
+                if b > len(row_chars):
+                    row_chars.extend([" "] * (b - len(row_chars)))
+                existing = "".join(row_chars[a:b])
+                formatted = _format_like_existing(existing, width, new_val)
+                row_chars[a:b] = list(formatted.ljust(width))
             
             out_lines.append("".join(row_chars) + ending)
             updated = True
@@ -831,6 +874,34 @@ def _parse_cul_header_and_row(cul_path: Path, cultivar_code: str) -> tuple[list[
     header_cols: list[str] | None = None
     def _normalize_cul_col(name: str) -> str:
         return str(name).lstrip("@").replace("\ufeff", "").strip().upper()
+
+    def _build_row_spans(cols: list[str], row_text: str) -> dict[str, tuple[int, int]]:
+        matches = list(re.finditer(r"\S+", row_text))
+        spans: dict[str, tuple[int, int]] = {}
+        if not cols or not matches:
+            return spans
+        if len(cols) == 1:
+            spans[cols[0]] = (int(matches[0].start()), len(row_text))
+            return spans
+        if len(matches) >= len(cols):
+            spans[cols[0]] = (int(matches[0].start()), int(matches[0].end()))
+            tail_cols = cols[2:]
+            if tail_cols:
+                tail_matches = matches[-len(tail_cols) :]
+                spans[cols[1]] = (int(matches[0].end()), int(tail_matches[0].start()))
+                for i, col in enumerate(tail_cols):
+                    start = int(tail_matches[i].start())
+                    end = int(tail_matches[i + 1].start()) if i + 1 < len(tail_matches) else len(row_text)
+                    spans[col] = (start, end)
+            else:
+                spans[cols[1]] = (int(matches[0].end()), len(row_text))
+            return spans
+        for i, col in enumerate(cols[: len(matches)]):
+            start = int(matches[i].start())
+            end = int(matches[i + 1].start()) if i + 1 < len(matches) else len(row_text)
+            spans[col] = (start, end)
+        return spans
+
     for line in lines:
         stripped = line.strip()
         if not stripped:
@@ -848,20 +919,18 @@ def _parse_cul_header_and_row(cul_path: Path, cultivar_code: str) -> tuple[list[
         if not line.startswith(cultivar_code):
             continue
         row = line.rstrip("\r\n")
-        matches = list(re.finditer(r"\S+", row))
-        if len(matches) < len(header_cols):
-            continue
-        cols = list(header_cols)
-        if len(matches) > len(cols):
-            cols = cols + [f"__EXTRA_{i}__" for i in range(len(matches) - len(cols))]
+        row_spans = _build_row_spans(header_cols, row)
         out_vals: dict[str, float] = {}
-        for col, m in zip(cols, matches):
-            raw = row[m.start() : m.end()].strip()
+        row_len = len(row)
+        for col, (a, b) in row_spans.items():
+            if a >= row_len:
+                continue
+            raw = row[a : min(b, row_len)].strip()
             try:
                 out_vals[col] = float(raw)
             except ValueError:
                 continue
-        return cols, out_vals
+        return list(header_cols), out_vals
     return [], {}
 
 
