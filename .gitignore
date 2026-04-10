@@ -80,3 +80,22 @@ docs/reference/DSSAT-PEST/ERROR.txt
 docs/reference/DSSAT-PEST/PEST_software/*.eer
 .dssat_rt/
 autoresearch_sandbox/tmp_weight_audit/
+
+# DSSAT runtime artifacts (misc)
+DSSATPRO.v48
+Phase1_Experiment
+Phase1_Experiment/
+
+# Sandbox debug outputs
+autoresearch_sandbox/debug_runs/
+autoresearch_sandbox/debug_oneoff_*/
+autoresearch_sandbox/cul_*/
+autoresearch_sandbox/wheat_*/
+
+# Large reference result bundles (local-only)
+docs/reference/Calibration_Results/
+docs/reference/Sensitivity_Analyze/
+docs/reference/tools/
+
+# WIP notes (AI scratch)
+docs/CUL路径问题参考资料.md

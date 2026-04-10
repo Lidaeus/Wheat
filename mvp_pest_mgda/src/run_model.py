@@ -6,6 +6,7 @@ import json
 import os
 import random
 import re
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -27,9 +28,10 @@ from case_runtime import (
     CaseRuntime,
     RuntimeFileState,
     ensure_case_support_files,
+    ensure_local_dssatpro,
     ensure_local_runtime,
     ensure_nonempty_cultivar_file,
-    infer_cul_path_from_inp,
+    infer_cul_path_from_inp as _infer_cul_path_from_inp,
     patch_cultivar_dir_in_inp_inh,
     resolve_case_runtime,
     resolve_case_dir,
@@ -48,10 +50,13 @@ from dssat_io import (
     resolve_crop_family,
     resolve_dssat_exe_path,
     resolve_dssat_genotype_dir,
+    resolve_dssat_root,
     resolve_param_mapping,
     resolve_project_config_path,
     rewrite_cul_values,
 )
+
+infer_cul_path_from_inp = _infer_cul_path_from_inp
 
 
 OUTPUT_FILES = ["Evaluate.OUT", "Summary.OUT", "PlantGro.OUT", "PlantGr2.OUT", "WARNING.OUT"]
@@ -108,6 +113,7 @@ class PreparedCaseRun:
     cul_path: Path
     cultivar_code: str
     trts_env: str
+    runtime_root: Path | None = None
 
 
 def _resolve_run_id(cwd: Path) -> str:
@@ -467,7 +473,7 @@ def _read_params(params_path: Path) -> dict[str, float]:
         parts = line.split()
         if len(parts) < 2:
             continue
-        key = parts[0].strip()
+        key = parts[0].strip().lstrip("\ufeff")
         val = float(parts[1])
         params[key] = val
     return params
@@ -479,6 +485,208 @@ def _sh2o_token(value: float) -> str:
     if s.startswith("0"):
         s = s[1:]
     return s
+
+
+def _copy_file_if_needed(src: Path, dst: Path) -> None:
+    if not src.exists() or not src.is_file():
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if not dst.exists() or dst.stat().st_size != src.stat().st_size:
+        shutil.copy2(src, dst)
+
+
+def _collect_support_files(base_dirs: list[Path], patterns: tuple[str, ...]) -> list[Path]:
+    out: list[Path] = []
+    seen: set[Path] = set()
+    for base_dir in base_dirs:
+        if not base_dir.exists() or not base_dir.is_dir():
+            continue
+        for pattern in patterns:
+            for path in sorted(base_dir.glob(pattern)):
+                resolved = path.resolve()
+                if resolved in seen or not path.is_file():
+                    continue
+                seen.add(resolved)
+                out.append(path)
+    return out
+
+
+def _copy_weather_variants(src: Path, destinations: list[Path]) -> None:
+    for destination in destinations:
+        dst = destination / src.name
+        _copy_file_if_needed(src, dst)
+        if dst.suffix.upper() == ".WTH" and os.environ.get("DSSAT_EXTEND_WTH", "").strip() in {"1", "true", "yes"}:
+            _extend_wth_to_year_end(dst)
+
+
+def _extend_wth_to_year_end(wth_path: Path) -> None:
+    if not wth_path.exists():
+        return
+    try:
+        lines = wth_path.read_text(encoding="utf-8", errors="ignore").splitlines(keepends=True)
+    except Exception:
+        return
+    last_idx = None
+    last_yyddd = None
+    last_payload = None
+    last_ending = "\n"
+    for i in range(len(lines) - 1, -1, -1):
+        raw = lines[i]
+        row = raw.strip()
+        if not row or row.startswith("*") or row.startswith("!") or row.startswith("@"):
+            continue
+        token = row.split()[0]
+        if not token.isdigit():
+            continue
+        try:
+            yyddd = int(token)
+        except ValueError:
+            continue
+        last_idx = i
+        last_yyddd = yyddd
+        last_payload = row[len(token) :]
+        last_ending = raw[len(raw.rstrip("\r\n")) :]
+        break
+    if last_idx is None or last_yyddd is None or last_payload is None:
+        return
+    yy = last_yyddd // 1000
+    doy = last_yyddd % 1000
+    target_doy = 365
+    if doy >= target_doy:
+        return
+    appended: list[str] = []
+    for d in range(doy + 1, target_doy + 1):
+        appended.append(f"{yy:02d}{d:03d}{last_payload}{last_ending}")
+    try:
+        wth_path.write_text("".join(lines) + "".join(appended), encoding="utf-8")
+    except Exception:
+        return
+
+
+def _resolve_runtime_support_root() -> Path:
+    project_root = Path(__file__).resolve().parents[1]
+    resolved = resolve_dssat_root(project_root)
+    if (resolved / "Weather").exists() or (resolved / "Soil").exists():
+        return resolved
+    env_root = str(os.environ.get("DSSAT_ROOT", "")).strip()
+    if env_root:
+        env_path = Path(env_root)
+        if env_path.exists():
+            return env_path
+    legacy_root = Path(r"C:\DSSAT48")
+    if legacy_root.exists():
+        return legacy_root
+    return resolved
+
+
+def _neutralize_support_paths_to_use_dssatpro(runtime_root: Path) -> None:
+    inp_path = runtime_root / "DSSAT48.INP"
+    inh_path = runtime_root / "DSSAT48.INH"
+
+    def neutralize_lines(path: Path) -> None:
+        if not path.exists():
+            return
+        try:
+            raw_lines = path.read_text(encoding="utf-8", errors="ignore").splitlines(keepends=True)
+        except Exception:
+            return
+        out_lines: list[str] = []
+        for raw in raw_lines:
+            row = raw.rstrip("\r\n")
+            row = row.replace("\x00", " ")
+            ending = raw[len(row) :]
+            row_u = row.upper()
+            should_neutralize = False
+            if path.name.upper().endswith(".INP"):
+                stripped = row_u.lstrip()
+                for key in ("SPECIES", "ECOTYPE", "CULTIVAR", "PESTS", "SOILS", "WEATHERW"):
+                    if stripped.startswith(key):
+                        should_neutralize = True
+                        break
+            else:
+                if any(ext in row_u for ext in (".CUL", ".ECO", ".SPE", ".WTH", ".WHT", ".SOL")):
+                    should_neutralize = True
+
+            if should_neutralize:
+                pos = row_u.find(":\\")
+                if pos >= 1 and row_u[pos - 1].isalpha():
+                    start = pos - 1
+                    row = row[:start] + (" " * (len(row) - start))
+            out_lines.append(row + ending)
+        try:
+            path.write_text("".join(out_lines), encoding="utf-8")
+        except Exception:
+            return
+
+    neutralize_lines(inp_path)
+    neutralize_lines(inh_path)
+
+
+def _sanitize_null_padding(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        raw = path.read_bytes()
+    except Exception:
+        return
+    if b"\x00" not in raw:
+        return
+    try:
+        path.write_bytes(raw.replace(b"\x00", b" "))
+    except Exception:
+        return
+
+
+def _prepare_runtime_dir(
+    runtime_root: Path,
+    dssat_dir: Path,
+    live_filex: Path,
+    base: Path,
+    runtime_genotype: Path,
+) -> None:
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    runtime_filex = runtime_root / live_filex.name
+    if not runtime_filex.exists() or runtime_filex.stat().st_size != live_filex.stat().st_size:
+        shutil.copy2(live_filex, runtime_filex)
+    runtime_base = runtime_root / base.name
+    if base.exists() and (not runtime_base.exists() or runtime_base.stat().st_size != base.stat().st_size):
+        shutil.copy2(base, runtime_base)
+    for name in ("DSSBatch.v48", "DSSAT48.INP", "DSSAT48.INH"):
+        src = dssat_dir / name
+        if src.exists():
+            dst = runtime_root / name
+            _copy_file_if_needed(src, dst)
+            if name.upper().endswith((".INP", ".INH")):
+                _sanitize_null_padding(dst)
+    batch_path = runtime_root / "DSSBatch.v48"
+    if batch_path.exists():
+        _write_local_batch(
+            batch_path,
+            runtime_root / "DSSBatch.runtime.v48",
+            live_filex.name,
+            directory_comment=str(runtime_root.resolve()),
+        )
+    _neutralize_support_paths_to_use_dssatpro(runtime_root)
+    runtime_weather = runtime_root / "Weather"
+    dssat_root = _resolve_runtime_support_root()
+    weather_files = _collect_support_files(
+        [dssat_dir, dssat_dir / "Weather", dssat_root / "Weather"],
+        ("*.WTH", "*.WHT"),
+    )
+    for weather_file in weather_files:
+        _copy_weather_variants(weather_file, [runtime_root, runtime_weather])
+    if os.environ.get("DSSAT_COPY_WEATHER_TO_EXE_DIR", "").strip() in {"1", "true", "yes"}:
+        exe_dir = resolve_dssat_exe_path(Path(__file__).resolve().parents[1]).resolve().parent
+        for copied in _collect_support_files([runtime_root, runtime_weather], ("*.WTH", "*.WHT")):
+            _copy_file_if_needed(copied, exe_dir / copied.name)
+    runtime_soil = runtime_root / "Soil"
+    soil_files = _collect_support_files([dssat_dir / "Soil", dssat_root / "Soil"], ("*.*",))
+    for soil_file in soil_files:
+        _copy_file_if_needed(soil_file, runtime_soil / soil_file.name)
+        _copy_file_if_needed(soil_file, runtime_root / soil_file.name)
+    for genotype_file in runtime_genotype.glob("*.*"):
+        _copy_file_if_needed(genotype_file, runtime_root / genotype_file.name)
+    ensure_local_dssatpro(dssat_dir, runtime_genotype, runtime_root)
 
 
 def _run_dssat(filex: str, trt: int, cwd: Path, cfg: dict) -> None:
@@ -535,6 +743,52 @@ def _choose_case_dir(cwd: Path, project_root: Path, cfg: dict) -> Path:
     return resolve_case_dir(cwd, project_root, cfg, env_case_dir=os.environ.get("DSSAT_CASE_DIR", ""))
 
 
+def _write_local_batch(
+    batch_src_path: Path,
+    batch_dst_path: Path,
+    filex_basename: str,
+    directory_comment: str | None = None,
+) -> bool:
+    src = Path(batch_src_path)
+    if not src.exists():
+        return False
+    try:
+        raw_lines = src.read_text(encoding="utf-8", errors="ignore").splitlines(keepends=True)
+    except Exception:
+        return False
+    out_lines: list[str] = []
+    for line in raw_lines:
+        row = line.rstrip("\r\n")
+        ending = line[len(row) :]
+        stripped = row.strip()
+        if not stripped:
+            out_lines.append(line)
+            continue
+        if stripped.startswith("!"):
+            if directory_comment is not None and re.match(r"^\s*!\s*Directory\s*:.*$", row, flags=re.IGNORECASE):
+                out_lines.append(f"! Directory    : {directory_comment}{ending}")
+            else:
+                out_lines.append(line)
+            continue
+        if stripped.startswith("$") or stripped.startswith("@"):
+            out_lines.append(line)
+            continue
+        m = re.match(r"^(\s*)(\S+)(.*)$", row)
+        if not m:
+            out_lines.append(line)
+            continue
+        prefix, old_tok, rest = m.group(1), m.group(2), m.group(3)
+        new_tok = str(filex_basename)
+        if len(new_tok) < len(old_tok):
+            new_tok = new_tok + (" " * (len(old_tok) - len(new_tok)))
+        out_lines.append(prefix + new_tok + rest + ending)
+    try:
+        Path(batch_dst_path).write_text("".join(out_lines), encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
 
 
 def _parse_trts(value: str) -> list[int]:
@@ -569,6 +823,41 @@ def _extract_eval_metrics(eval_path: Path, var_codes: list[str]) -> TreatmentMet
 def _extract_table_metrics(path: Path, var_codes: list[str]) -> TreatmentMetrics:
     row = read_table_row(path)
     return _extract_metrics_from_row(row, var_codes)
+
+
+def _extract_plantgro_max_value(plantgro_path: Path, var_code: str) -> float | None:
+    if not plantgro_path.exists():
+        return None
+    lines = plantgro_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    header = None
+    for line in lines:
+        if line.strip().startswith("@"):
+            header = line
+            break
+    if not header:
+        return None
+    header_matches = list(re.finditer(r"\S+", header))
+    cols = [m.group(0).lstrip("@").strip().upper() for m in header_matches]
+    v_u = str(var_code).strip().upper()
+    if v_u not in cols:
+        return None
+    idx = cols.index(v_u)
+    best: float | None = None
+    for line in lines:
+        if not line or line.startswith("*") or line.startswith("!") or line.strip().startswith("@"):
+            continue
+        raw = line.replace("\x00", " ")
+        try:
+            parts = re.split(r"\s+", raw.strip())
+            if len(parts) <= idx:
+                continue
+            value = float(parts[idx])
+        except Exception:
+            continue
+        if value >= 98.0:
+            continue
+        best = value if best is None else max(best, value)
+    return best
 
 
 def _yyddd_to_year_doy(yyddd: int) -> tuple[int, int]:
@@ -726,8 +1015,35 @@ def _extract_cultivar_row_text(cul_path: Path, cultivar_code: str) -> str:
     return ""
 
 
+def _sanitize_cul_concatenated_tail(cul_path: Path, cultivar_code: str) -> None:
+    target = str(cultivar_code).strip()
+    if not target or not cul_path.exists():
+        return
+    try:
+        raw_lines = cul_path.read_text(encoding="utf-8", errors="ignore").splitlines(keepends=True)
+    except Exception:
+        return
+    out_lines: list[str] = []
+    updated = False
+    for raw in raw_lines:
+        line = raw.rstrip("\r\n")
+        ending = raw[len(line) :]
+        if line.startswith(target):
+            fixed = re.sub(r"(\d+\.\d{2})(\d+\.\d{2})(\s*)$", r"\1 \2\3", line)
+            if fixed != line:
+                line = fixed
+                updated = True
+        out_lines.append(line + ending)
+    if updated:
+        try:
+            cul_path.write_text("".join(out_lines), encoding="utf-8")
+        except Exception:
+            return
+
+
 def _rewrite_cul_params(cul_path: Path, cultivar_code: str, updates: dict[str, float]) -> None:
     rewrite_cul_values(cul_path, cultivar_code, {str(k).strip().upper(): float(v) for k, v in updates.items()})
+    _sanitize_cul_concatenated_tail(cul_path, cultivar_code)
 
 
 def _clear_output_files(dssat_dir: Path) -> None:
@@ -750,6 +1066,12 @@ def execute_treatment(trt: int, filex_name: str, dssat_dir: Path, cfg: dict, cas
         except Exception:
             pass
 
+    if "laix" in metrics and float(metrics.get("laix") or 0.0) >= 98.0:
+        plantgro_path = dssat_dir / "PlantGro.OUT"
+        lai = _extract_plantgro_max_value(plantgro_path, "LAID")
+        if lai is not None:
+            metrics["laix"] = float(lai)
+
     dates = case_runtime.observation.wht_dates_by_trt.get(int(trt), [])
     if dates:
         plantgro_path = dssat_dir / "PlantGro.OUT"
@@ -765,6 +1087,17 @@ def execute_treatment(trt: int, filex_name: str, dssat_dir: Path, cfg: dict, cas
         for date, values in timeseries.items():
             for key, value in values.items():
                 metrics[f"{str(key).strip().lower()}_d{int(date)}"] = float(value)
+
+    if os.environ.get("DSSAT_COPY_OUTPUTS_PER_TRT", "").strip() in {"1", "true", "yes"}:
+        for name in ["Evaluate.OUT", "Summary.OUT", "PlantGro.OUT", "PlantGr2.OUT", "WARNING.OUT", "OVERVIEW.OUT", "DSSAT48.OUT"]:
+            src = dssat_dir / name
+            if not src.exists():
+                continue
+            dst = dssat_dir / f"{name}.trt{int(trt):02d}"
+            try:
+                shutil.copy2(src, dst)
+            except Exception:
+                pass
 
     return metrics
 
@@ -790,16 +1123,21 @@ def execute_case(
     case_runtime: CaseRuntime,
     file_state: RuntimeFileState,
     keep_outputs: bool,
+    runtime_root: Path | None = None,
 ) -> tuple[MetricsByTreatment, int]:
+    run_dir = runtime_root if runtime_root is not None else dssat_dir
+    if runtime_root is not None:
+        runtime_genotype = cul_path.parent
+        _prepare_runtime_dir(runtime_root, dssat_dir, live_filex, base, runtime_genotype)
     if case_runtime.input_plan.wth_updates and case_runtime.input_plan.wth_path is not None:
         rewrite_wth_daily(case_runtime.input_plan.wth_path, case_runtime.input_plan.wth_updates)
     if case_runtime.input_plan.sol_updates and case_runtime.input_plan.sol_path is not None:
         rewrite_sol_layers(case_runtime.input_plan.sol_path, case_runtime.input_plan.sol_updates)
 
-    _clear_output_files(dssat_dir)
+    _clear_output_files(run_dir)
     lock_path = _acquire_cultivar_lock(cul_path)
     audit_enabled = os.environ.get("DSSAT_DEBUG_CUL_AUDIT", "").strip().lower() in {"1", "true", "yes", "y"}
-    audit_path = Path(os.environ.get("DSSAT_CUL_AUDIT_PATH", str(dssat_dir / "cul_audit.json")))
+    audit_path = Path(os.environ.get("DSSAT_CUL_AUDIT_PATH", str(run_dir / "cul_audit.json")))
     audit_payload = {
         "cul_path": str(cul_path),
         "cultivar_code": str(cultivar_code),
@@ -810,9 +1148,12 @@ def execute_case(
     try:
         if case_runtime.input_plan.has_sh2o:
             rewrite_initial_sh2o(base, live_filex, case_runtime.input_plan.sh2o_by_icbl)
-        if case_runtime.input_plan.cul_updates:
-            _rewrite_cul_params(cul_path, cultivar_code, case_runtime.input_plan.cul_updates)
-            audit_payload["after_row"] = _extract_cultivar_row_text(cul_path, cultivar_code)
+        _rewrite_cul_params(cul_path, cultivar_code, case_runtime.input_plan.cul_updates)
+        audit_payload["after_row"] = _extract_cultivar_row_text(cul_path, cultivar_code)
+        try:
+            shutil.copy2(cul_path, cul_path.parent.parent / cul_path.name)
+        except Exception:
+            pass
         if audit_enabled:
             audit_path.write_text(json.dumps(audit_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -820,13 +1161,13 @@ def execute_case(
         treatment_calls = 0
         for trt in trts:
             treatment_calls += 1
-            metrics_by_trt[int(trt)] = execute_treatment(int(trt), filex_name, dssat_dir, cfg, case_runtime)
+            metrics_by_trt[int(trt)] = execute_treatment(int(trt), filex_name, run_dir, cfg, case_runtime)
         return metrics_by_trt, treatment_calls
     finally:
         _restore_runtime_files(file_state)
         _release_cultivar_lock(lock_path)
         if not keep_outputs:
-            _clear_output_files(dssat_dir)
+            _clear_output_files(run_dir)
 
 
 def _coerce_execute_case_result(result: object, trts: list[int]) -> tuple[MetricsByTreatment, int]:
@@ -886,28 +1227,25 @@ def prepare_case_run(cwd: Path | None = None) -> PreparedCaseRun:
         project_root=project_root,
     )
     ensure_nonempty_cultivar_file(cul_path, project_root, dssat_dir)
-    inferred_cul = infer_cul_path_from_inp(dssat_dir, cfg)
-    if inferred_cul is not None:
-        ensure_nonempty_cultivar_file(inferred_cul, project_root, dssat_dir)
     fallback_root_cul = resolve_dssat_genotype_dir(project_root, cfg=cfg) / cul_path.name
     ensure_nonempty_cultivar_file(fallback_root_cul, project_root, dssat_dir)
+    runtime_root_override = str(os.environ.get("DSSAT_RUNTIME_ROOT", "")).strip()
+    if not runtime_root_override:
+        runtime_root_override = str(run_cwd.resolve())
     runtime_exe, runtime_genotype = ensure_local_runtime(
         project_root,
         dssat_dir,
         cul_path,
         cfg,
-        env_runtime_root=os.environ.get("DSSAT_RUNTIME_ROOT", ""),
+        env_runtime_root=runtime_root_override,
         env_dssat_exe=os.environ.get("DSSAT_EXE", ""),
     )
     cfg.setdefault("paths", {})["dssat_exe"] = str(runtime_exe)
+    runtime_root = runtime_genotype.parent
     runtime_cul_path = runtime_genotype / cul_path.name
     cultivar_code = _extract_cultivar_code(live_filex)
 
-    case_dirs_to_patch = [dssat_dir]
-    local_case_dir = (run_cwd / "dssat_case").resolve()
-    if local_case_dir.exists():
-        case_dirs_to_patch.append(local_case_dir)
-    _patch_case_support_dirs(case_dirs_to_patch, runtime_genotype)
+    ensure_local_dssatpro(dssat_dir, runtime_genotype, runtime_root)
     case_runtime = resolve_case_runtime(
         dssat_dir,
         cfg,
@@ -934,6 +1272,7 @@ def prepare_case_run(cwd: Path | None = None) -> PreparedCaseRun:
         cul_path=runtime_cul_path,
         cultivar_code=cultivar_code,
         trts_env=trts_env,
+        runtime_root=runtime_root,
     )
 
 
@@ -960,6 +1299,7 @@ def main() -> None:
             prepared.case_runtime,
             prepared.file_state,
             prepared.keep_outputs,
+            prepared.runtime_root,
             ),
             prepared.trts,
         )

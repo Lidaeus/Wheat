@@ -21,10 +21,13 @@ PHASE1_RUNS_DIR = SANDBOX_DIR / "phase1_runs"
 
 W_MAP = {
     "W0": "w0_raw_identity",
+    "W1": "w1_inverse_variance",
     "W2": "w2_inverse_rmse",
+    "W3": "w3",
     "W4": "w4_min_max_equal",
     "W5": "w5_mean_normalized",
     "W6": "w6_log_transformation",
+    "W7": "w_custom_strategy",
     "W8": "w8_dssat_group_max",
     "W9": "w9_pareto_no_preweight",
 }
@@ -44,6 +47,20 @@ G_MAP = {
 
 CURRENT_STRATEGY_SOURCE = CURRENT_STRATEGY_PATH.read_text(encoding="utf-8")
 BENCHMARK_STRATEGIES = {
+    "W1": """import numpy as np
+
+def calculate_loss(sim_yield, obs_yield, sim_lai, obs_lai):
+    eps = 1e-8
+    sim_yield = np.asarray(sim_yield, dtype=float)
+    obs_yield = np.asarray(obs_yield, dtype=float)
+    sim_lai = np.asarray(sim_lai, dtype=float)
+    obs_lai = np.asarray(obs_lai, dtype=float)
+    rmse_y = np.sqrt(np.mean((sim_yield - obs_yield) ** 2))
+    rmse_l = np.sqrt(np.mean((sim_lai - obs_lai) ** 2))
+    std_y = np.sqrt(np.var(obs_yield)) + eps
+    std_l = np.sqrt(np.var(obs_lai)) + eps
+    return float(rmse_y / std_y + rmse_l / std_l)
+""",
     "W2": """import numpy as np
 
 def calculate_loss(sim_yield, obs_yield, sim_lai, obs_lai):
@@ -55,6 +72,20 @@ def calculate_loss(sim_yield, obs_yield, sim_lai, obs_lai):
     norm_y = rmse_y / scale_y
     norm_l = rmse_l / scale_l
     return float(norm_y + norm_l)
+""",
+    "W3": """import numpy as np
+
+def calculate_loss(sim_yield, obs_yield, sim_lai, obs_lai):
+    eps = 1e-8
+    sim_yield = np.asarray(sim_yield, dtype=float)
+    obs_yield = np.asarray(obs_yield, dtype=float)
+    sim_lai = np.asarray(sim_lai, dtype=float)
+    obs_lai = np.asarray(obs_lai, dtype=float)
+    rmse_y = np.sqrt(np.mean((sim_yield - obs_yield) ** 2))
+    rmse_l = np.sqrt(np.mean((sim_lai - obs_lai) ** 2))
+    denom_y = float(np.mean(obs_yield)) + eps
+    denom_l = float(np.mean(obs_lai)) + eps
+    return float(rmse_y / denom_y + rmse_l / denom_l)
 """,
     "W4": """import numpy as np
 
@@ -77,6 +108,20 @@ def calculate_loss(sim_yield, obs_yield, sim_lai, obs_lai):
     loss_y = np.mean((log_sim_y - log_obs_y) ** 2)
     loss_l = np.mean((log_sim_l - log_obs_l) ** 2)
     return float(loss_y + loss_l)
+""",
+    "W7": """import numpy as np
+
+def calculate_loss(sim_yield, obs_yield, sim_lai, obs_lai):
+    eps = 1e-8
+    sim_yield = np.asarray(sim_yield, dtype=float)
+    obs_yield = np.asarray(obs_yield, dtype=float)
+    sim_lai = np.asarray(sim_lai, dtype=float)
+    obs_lai = np.asarray(obs_lai, dtype=float)
+    wy = 1.0 / np.square(np.clip(np.abs(obs_yield), eps, None))
+    wl = 1.0 / np.square(np.clip(np.abs(obs_lai), eps, None))
+    mse_y = np.average(np.square(sim_yield - obs_yield), weights=wy)
+    mse_l = np.average(np.square(sim_lai - obs_lai), weights=wl)
+    return float(np.sqrt(mse_y) + np.sqrt(mse_l))
 """,
 }
 
@@ -103,6 +148,14 @@ BATCH_C = [
 BATCH_D = [(w, o, s, g) for w in ("W0", "W4", "W6", "W8") for o in ("O1", "O2") for s in ("S1", "S2") for g in ("G1", "G3")]
 LEGACY_CORE = [(w, o, "S2", "G3") for w in ("W2", "W5") for o in ("O1", "O2")]
 LEGACY_MGDA = [("W9", "O5", "S2", "G3")]
+LEGACY_WEIGHTS = [
+    ("W2", "O1", "S2", "G3"),
+    ("W0", "O5", "S2", "G3"),
+    ("W6", "O1", "S2", "G3"),
+    ("W7", "O1", "S2", "G3"),
+    ("W1", "O1", "S2", "G3"),
+    ("W3", "O1", "S2", "G3"),
+]
 BATCH_MAP = {
     "BatchA": BATCH_A,
     "BatchB": BATCH_B,
@@ -110,6 +163,7 @@ BATCH_MAP = {
     "BatchD": BATCH_D,
     "LegacyCore": LEGACY_CORE,
     "LegacyMGDA": LEGACY_MGDA,
+    "LegacyWeights": LEGACY_WEIGHTS,
 }
 
 SUMMARY_FIELDS = [
@@ -267,6 +321,7 @@ def initialize_output_tables(session_root: Path) -> None:
 def baseline_jobs() -> list[tuple[str, str, str, str, str, str | None, str | None]]:
     return [
         ("B0", "w0_raw_identity", "default_dssat", "s1_naive_joint", "g1_flat_all_in_one", "external", None),
+        ("B0_OFFICIAL", "w0_raw_identity", "default_dssat", "s1_naive_joint", "g1_flat_all_in_one", "cul", None),
         ("B1", "w0_raw_identity", "default_dssat", "s1_naive_joint", "g1_flat_all_in_one", "clipped", None),
         ("B2", "w8_dssat_group_max", "o6_pestpp_glm", "s2_sequential_phase", "g3_dssat_extended", "external", "standard"),
     ]
@@ -361,6 +416,19 @@ def write_manifest(session_root: Path, payload: dict) -> None:
     (session_root / "phase1_run_manifest.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _extract_final_score(stdout: str) -> float | None:
+    for raw in reversed((stdout or "").splitlines()):
+        row = raw.strip()
+        if not row.startswith("Final_Score:"):
+            continue
+        value = row.split(":", 1)[1].strip()
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
 def run_job(job: dict, session_root: Path) -> dict:
     logs_dir = session_root / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -397,14 +465,22 @@ def run_job(job: dict, session_root: Path) -> dict:
         stderr_path.write_text(result.stderr or "", encoding="utf-8")
         duration = time.time() - started
         status = "success" if result.returncode == 0 else "failed"
+        final_score = _extract_final_score(result.stdout or "")
+        score_text = f"{final_score:.6f}" if final_score is not None else "NA"
         if status == "success":
-            print(f"[{time.strftime('%H:%M:%S')}] completed {job['combo_key']} for {job['crop']} in {duration:.1f}s", flush=True)
+            print(
+                f"[{time.strftime('%H:%M:%S')}] completed {job['combo_key']} for {job['crop']} in {duration:.1f}s score={score_text}",
+                flush=True,
+            )
         else:
-            print(f"[{time.strftime('%H:%M:%S')}] failed {job['combo_key']} for {job['crop']} rc={result.returncode}", flush=True)
+            print(
+                f"[{time.strftime('%H:%M:%S')}] failed {job['combo_key']} for {job['crop']} rc={result.returncode} score={score_text}",
+                flush=True,
+            )
             tail = (result.stderr or result.stdout or "")[-500:]
             if tail:
                 print(tail, flush=True)
-        return {"run_id": job["run_id"], "status": status, "returncode": result.returncode}
+        return {"run_id": job["run_id"], "status": status, "returncode": result.returncode, "score": final_score}
     except Exception as exc:
         stderr_path.write_text(str(exc), encoding="utf-8")
         print(f"[{time.strftime('%H:%M:%S')}] exception {job['combo_key']} for {job['crop']}: {exc}", flush=True)
@@ -415,7 +491,11 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batch", choices=["Baselines", "BatchA", "BatchB", "BatchC", "BatchD", "LegacyCore", "LegacyMGDA", "All"], default="All")
+    parser.add_argument(
+        "--batch",
+        choices=["Baselines", "BatchA", "BatchB", "BatchC", "BatchD", "LegacyCore", "LegacyMGDA", "LegacyWeights", "All"],
+        default="All",
+    )
     parser.add_argument("--repetitions", type=int, default=5)
     parser.add_argument("--workers", type=int, default=14)
     parser.add_argument("--budget", choices=["quick", "standard", "matrix", "phase3_formal"], default="quick")

@@ -1988,9 +1988,66 @@ def comparable_evaluation_metrics():
     return comparable_metric_catalog()
 
 
+def _official_cul_baseline_params() -> np.ndarray | None:
+    filex_name = str((PROJECT_CONFIG.get("scenario", {}) or {}).get("filex", "")).strip()
+    if not filex_name:
+        return None
+    filex_path = resolve_config_case_path(filex_name, PROJECT_CONFIG)
+    if not filex_path.exists():
+        return None
+    try:
+        cultivar_code = extract_cultivar_code(filex_path)
+    except Exception:
+        return None
+    cul_path = resolve_cultivar_path()
+    if cul_path is None or not cul_path.exists():
+        return None
+
+    header_cols: list[str] | None = None
+    values: dict[str, float] = {}
+    for raw in cul_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw.rstrip("\r\n")
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("@"):
+            header_cols = [c.lstrip("@").strip().upper() for c in stripped.split()]
+            continue
+        if stripped.startswith("*") or stripped.startswith("!"):
+            continue
+        if not header_cols:
+            continue
+        if not line.startswith(cultivar_code):
+            continue
+        tokens = line.split()
+        for idx, col in enumerate(header_cols):
+            if idx >= len(tokens):
+                break
+            try:
+                values[col] = float(tokens[idx])
+            except ValueError:
+                continue
+        break
+
+    if not values:
+        return None
+    out: list[float] = []
+    for idx, name in enumerate(PARAM_NAMES):
+        key = str(name).strip().upper()
+        if key in values:
+            out.append(float(values[key]))
+            continue
+        out.append(float(INITIAL_GUESS[idx]) if idx < len(INITIAL_GUESS) else 0.0)
+    return np.array(out, dtype=float)
+
+
 def default_baseline_params():
     if BASELINE_PARAM_SOURCE == "clipped":
         return clip_params(INITIAL_GUESS)
+    if BASELINE_PARAM_SOURCE in {"cul", "cul_official", "official_cul", "dssat_cul"}:
+        resolved = _official_cul_baseline_params()
+        if resolved is not None:
+            return resolved
     return np.array(INITIAL_GUESS, dtype=float)
 
 

@@ -267,6 +267,7 @@ def resolve_dssat_exe_path(
     resolved_root = resolve_dssat_root(project_root, cfg=cfg, env_dssat_root=env_dssat_root)
     candidates.extend(
         [
+            (project_root.parent / "DSCSM048.EXE"),
             resolved_root / "DSCSM048.EXE",
             (project_root.parent / "local_dssat" / "DSCSM048.EXE"),
             (LEGACY_DSSAT_ROOT / "DSCSM048.EXE"),
@@ -585,8 +586,7 @@ def pick_eval_value(row: dict[str, str], var_code: str, prefer_suffix: str = "S"
         return None
     suf = str(prefer_suffix).strip().upper()
     
-    # Priority list for yield fallbacks (Dry weight > Fresh weight)
-    yield_fallbacks = ["HWAM", "CWAM", "PRCM", "HWUM", "HWAH"]
+    yield_fallbacks = ["HWAM", "HWAH", "HWUM", "CWAM"]
     is_yield = vc in {"HWAM", "YIELD"}
     
     # Base candidates list
@@ -617,18 +617,29 @@ def pick_eval_value(row: dict[str, str], var_code: str, prefer_suffix: str = "S"
     return None
 
 
+def _normalize_cul_col_name(name: str) -> str:
+    normalized = str(name).strip().upper()
+    normalized = normalized.replace("_", "-")
+    return normalized
+
+
 def rewrite_cul_values(cul_path: Path, cultivar_code: str, updates: dict[str, float]) -> None:
     """
     Updates specific parameter columns in a DSSAT .CUL file for a given cultivar.
     This implementation dynamically identifies column positions using the '@' header line,
     making it compatible with any crop cultivar file.
+    Parameter names are normalized so that underscores and hyphens match equivalently
+    (e.g., 'EM_FL' matches 'EM-FL' in the CUL file header).
     """
     raw_lines = cul_path.read_text(encoding="utf-8", errors="ignore").splitlines(keepends=True)
-    updates_u = {str(k).strip().upper(): float(v) for k, v in updates.items()}
+    updates_u = {str(k).strip().lstrip("\ufeff").upper(): float(v) for k, v in updates.items()}
     if not updates_u:
         return
 
     header_cols: list[str] | None = None
+    header_starts: list[int] | None = None
+    header_template_len: int | None = None
+    template_numeric_start: int | None = None
     fixed_numeric_order = ["P1V", "P1D", "P5", "G1", "G2", "G3", "PHINT"]
     fixed_numeric_formats = {
         "P1V": (6, 3),
@@ -658,7 +669,13 @@ def rewrite_cul_values(cul_path: Path, cultivar_code: str, updates: dict[str, fl
         s = existing_text.strip()
         if "." in s:
             decimals = len(s.split(".", 1)[1])
-            out = f"{float(value):>{width}.{decimals}f}"
+            best: str | None = None
+            for d in range(int(decimals), -1, -1):
+                candidate = f"{float(value):>{width}.{d}f}"
+                if len(candidate) <= width:
+                    best = candidate
+                    break
+            out = best if best is not None else f"{float(value):>{width}.{decimals}f}"
         else:
             out = f"{int(round(float(value))):>{width}d}"
         if len(out) > width:
@@ -667,20 +684,187 @@ def rewrite_cul_values(cul_path: Path, cultivar_code: str, updates: dict[str, fl
 
     out_lines: list[str] = []
     updated = False
+    found_cultivar_row = False
+    applied_keys: set[str] = set()
     
+    def _build_header_spans(header_line: str) -> tuple[list[str], list[int]] | tuple[None, None]:
+        header_text = header_line.rstrip("\r\n")
+        matches = list(re.finditer(r"\S+", header_text))
+        if not matches:
+            return None, None
+        cols = [m.group(0).lstrip("@").strip().upper() for m in matches]
+        starts = [int(m.start()) for m in matches]
+        if not cols or not starts:
+            return None, None
+        if len(cols) != len(starts):
+            return None, None
+        return cols, starts
+
+    def _row_bounds_for_starts(row_text: str, starts: list[int]) -> list[tuple[int, int]]:
+        row_len = len(row_text)
+        cleaned = [int(s) for s in starts if 0 <= int(s) <= row_len]
+        cleaned = sorted(set(cleaned))
+        if not cleaned:
+            return [(0, row_len)]
+        if cleaned[0] != 0:
+            cleaned = [0] + cleaned
+        bounds: list[tuple[int, int]] = []
+        for a, b in zip(cleaned, cleaned[1:]):
+            if b <= a:
+                continue
+            bounds.append((a, b))
+        if cleaned[-1] < row_len:
+            bounds.append((cleaned[-1], row_len))
+        return bounds
+
+    def _find_fixed_numeric_block_start(row_text: str) -> int | None:
+        block_len = 6 * len(fixed_numeric_order)
+        if len(row_text) < block_len:
+            return None
+        for s in range(0, len(row_text) - block_len + 1):
+            ok = True
+            for k in range(len(fixed_numeric_order)):
+                seg = row_text[s + (6 * k) : s + (6 * (k + 1))]
+                t = seg.strip()
+                if not t or not any(ch.isdigit() for ch in t):
+                    ok = False
+                    break
+                try:
+                    float(t)
+                except ValueError:
+                    ok = False
+                    break
+            if ok:
+                return s
+        return None
+
     # Pass 1: Find the header line and cultivar row to build the map
     for i, line in enumerate(raw_lines):
+        line = line.replace("\x00", " ")
         stripped = line.strip()
         if stripped.startswith("@"):
-            header_cols = [c.lstrip("@").strip().upper() for c in line.split()]
+            cols, starts = _build_header_spans(line)
+            header_cols = cols
+            header_starts = starts
+            if header_cols is not None:
+                header_template_len = len(line.rstrip("\r\n"))
             out_lines.append(line)
             continue
         
         # We only care about rows starting with our cultivar code
         if header_cols and line.startswith(cultivar_code):
+            found_cultivar_row = True
             row_text = line.rstrip("\r\n")
             ending = _line_ending(line)
-            
+            row_chars = list(row_text)
+            changed = False
+
+            if template_numeric_start is not None and any(col in updates_u for col in fixed_numeric_order):
+                template_start = int(template_numeric_start)
+                block_len = 6 * len(fixed_numeric_order)
+                padded_old = row_text.ljust(template_start + block_len)
+                numeric_values: dict[str, float] = {}
+                for idx, col in enumerate(fixed_numeric_order):
+                    seg = padded_old[template_start + (6 * idx) : template_start + (6 * (idx + 1))].strip()
+                    try:
+                        numeric_values[col] = float(seg)
+                    except ValueError:
+                        numeric_values[col] = 0.0
+                for col_name, new_val in updates_u.items():
+                    col_name_u = str(col_name).strip().upper()
+                    if col_name_u in numeric_values:
+                        numeric_values[col_name_u] = float(new_val)
+                        applied_keys.add(col_name_u)
+                prefix = padded_old[:template_start].rstrip()
+                tokens: list[str] = []
+                for col in fixed_numeric_order:
+                    _width, decimals = fixed_numeric_formats[col]
+                    tokens.append(f"{float(numeric_values[col]):.{decimals}f}")
+                out_lines.append(prefix + " " + " ".join(tokens) + ending)
+                updated = True
+                continue
+
+            if header_cols and str(header_cols[-1]).strip().upper() == "PHINT":
+                fixed = re.sub(r"(\d+\.\d{2})(\d+\.\d{2})\s*$", r"\1 \2", row_text)
+                if fixed != row_text:
+                    row_text = fixed
+                    row_chars = list(row_text)
+                    changed = True
+
+            numeric_start: int | None = _find_fixed_numeric_block_start(row_text)
+            if header_cols and str(header_cols[-1]).strip().upper() == "PHINT" and numeric_start is not None:
+                keep_end = int(numeric_start) + (6 * len(fixed_numeric_order))
+                if len(row_chars) > keep_end and row_text[keep_end:].strip():
+                    if keep_end < len(row_chars) and not str(row_chars[keep_end]).isspace():
+                        row_chars[keep_end:keep_end] = [" "]
+                        row_text = "".join(row_chars)
+                        changed = True
+
+            if any(col in updates_u for col in fixed_numeric_order):
+                if numeric_start is not None:
+                    for idx, col in enumerate(fixed_numeric_order):
+                        if col not in updates_u:
+                            continue
+                        a = numeric_start + (6 * idx)
+                        b = a + 6
+                        if len(row_chars) < b:
+                            row_chars.extend([" "] * (b - len(row_chars)))
+                        row_chars[a:b] = list(_format_fixed_numeric(col, updates_u[col]))
+                        changed = True
+                        applied_keys.add(col)
+
+            if header_starts:
+                original_row_text = row_text
+                desired_len = len(row_text)
+                if header_template_len is not None:
+                    desired_len = max(desired_len, int(header_template_len))
+                if header_starts:
+                    desired_len = max(desired_len, max(int(s) for s in header_starts) + 1)
+                row_text = row_text.ljust(desired_len)
+
+                bounds = _row_bounds_for_starts(row_text, header_starts)
+                if len(bounds) >= len(header_cols):
+                    padded_old = original_row_text.ljust(desired_len)
+                    row_chars = [" "] * desired_len
+                    for idx in range(min(len(header_cols), len(bounds))):
+                        a, b = bounds[idx]
+                        if b <= a:
+                            continue
+                        row_chars[a:b] = list(padded_old[a:b])
+
+                    col_bounds_normalized = {
+                        _normalize_cul_col_name(header_cols[idx]): bounds[idx] for idx in range(len(header_cols))
+                    }
+
+                    for col_name, new_val in updates_u.items():
+                        col_name_u = str(col_name).strip().upper()
+                        norm = _normalize_cul_col_name(col_name_u)
+                        if norm not in col_bounds_normalized:
+                            continue
+                        a, b = col_bounds_normalized[norm]
+                        width = b - a
+                        if width <= 0:
+                            continue
+                        existing = "".join(row_chars[a:b])
+                        if col_name_u in fixed_numeric_formats:
+                            formatted = _format_fixed_numeric(col_name_u, float(new_val))
+                            if len(formatted) != width:
+                                formatted = formatted.strip().rjust(width)
+                                if len(formatted) > width:
+                                    formatted = formatted[-width:]
+                        else:
+                            formatted = _format_like_existing(existing, width, new_val)
+                        if len(formatted) < width:
+                            formatted = formatted + (" " * (width - len(formatted)))
+                        row_chars[a:b] = list(formatted[:width])
+                        changed = True
+                        applied_keys.add(col_name_u)
+
+                if changed:
+                    out_lines.append("".join(row_chars) + ending)
+                    updated = True
+                    continue
+
             row_matches = list(re.finditer(r"\S+", row_text))
             if len(row_matches) < len(header_cols):
                 out_lines.append(line)
@@ -710,30 +894,41 @@ def rewrite_cul_values(cul_path: Path, cultivar_code: str, updates: dict[str, fl
                 row_matches = list(re.finditer(r"\S+", row_text))
 
             col_to_span: dict[str, tuple[int, int]] = {}
+            col_to_span_normalized: dict[str, tuple[int, int]] = {}
             for col, match in zip(header_cols, row_matches):
                 start = int(match.start())
                 end = int(match.end())
                 col_to_span[str(col).strip().upper()] = (start, end)
-            
+                col_to_span_normalized[_normalize_cul_col_name(col)] = (start, end)
             row_chars = list(row_text)
             for col_name, new_val in updates_u.items():
                 if col_name in fixed_cols_applied:
                     continue
-                if col_name in col_to_span:
-                    a, b = col_to_span[col_name]
+                col_name_normalized = _normalize_cul_col_name(col_name)
+                if col_name_normalized in col_to_span_normalized:
+                    a, b = col_to_span_normalized[col_name_normalized]
                     width = b - a
                     existing = "".join(row_chars[a:b])
                     formatted = _format_like_existing(existing, width, new_val)
                     row_chars[a:b] = list(formatted)
+                    applied_keys.add(str(col_name).strip().upper())
             
             out_lines.append("".join(row_chars) + ending)
             updated = True
         else:
+            if header_cols:
+                candidate = line.rstrip("\r\n")
+                start_opt: int | None = _find_fixed_numeric_block_start(candidate)
+                if start_opt is not None:
+                    template_numeric_start = start_opt if template_numeric_start is None else max(template_numeric_start, start_opt)
             out_lines.append(line)
 
     if not updated:
-        # If not found, it might be in a different section or missing
-        # We don't raise error here to allow quiet skipping of non-matching files
+        if found_cultivar_row and updates_u and not applied_keys:
+            raise RuntimeError(
+                f"CUL rewrite failed to apply any updates for cultivar '{cultivar_code}' in {cul_path}. "
+                f"Requested={sorted(updates_u.keys())}"
+            )
         return 
 
     cul_path.write_text("".join(out_lines), encoding="utf-8")

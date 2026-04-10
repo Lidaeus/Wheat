@@ -155,7 +155,25 @@ $runner = "D:\Wheat\Parallel_Exp\autoresearch_sandbox\phase1_runner.py"
 & $py $runner --batch BatchD --budget standard --workers 14 --repetitions 1 --crops Wheat --tag phase1_batchd_standard
 ```
 
-### 7.4 多作物串行模板
+### 7.4 一键运行全部正式实验（推荐）
+
+根据实验实践指南，正式实验需要运行全部批次（BatchA/B/C/D + Baselines）覆盖五作物，并设置足够重复次数以支撑 rank stability 分析。
+
+**单作物完整正式实验（5 次重复）：**
+
+```powershell
+& $py $runner --batch All --budget standard --workers 14 --repetitions 5 --crops Wheat --tag phase1_wheat_full
+```
+
+**五作物完整正式实验（一键运行）：**
+
+```powershell
+& $py $runner --batch All --budget standard --workers 14 --repetitions 5 --crops Wheat,Maize,Soybean,Rice,Cotton --tag phase1_full_standard
+```
+
+> 说明：`--batch All` 会依次运行 Baselines + BatchA/B/C/D，共 175 个唯一配置（32×5 主矩阵 + 3×5 基线）。`--repetitions 5` 确保每个配置运行 5 次，总计约 875 次运行，可支撑稳健性统计与论文主结果。
+
+### 7.5 多作物串行模板
 
 ```powershell
 $crops = @("Wheat","Maize","Soybean","Rice","Cotton")

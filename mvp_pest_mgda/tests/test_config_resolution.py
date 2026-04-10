@@ -3375,6 +3375,157 @@ class TestCaseRuntimeResolution(unittest.TestCase):
         self.assertEqual(inp_out[inp_out.index("C:\\") : inp_out.index("C:\\") + len(new_dir)], new_dir)
         self.assertEqual(inh_out[inh_out.index("C:\\") : inh_out.index("C:\\") + len(new_dir)], new_dir)
 
+    def test_ensure_local_dssatpro_targets_runtime_execution_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project_root = ROOT
+            source_profile = project_root / "DSSATPRO.v48"
+            runtime_root = root / "runtime"
+            runtime_genotype = runtime_root / "Genotype"
+            runtime_weather = runtime_root / "Weather"
+            runtime_soil = runtime_root / "Soil"
+            runtime_genotype.mkdir(parents=True, exist_ok=True)
+            runtime_weather.mkdir(parents=True, exist_ok=True)
+            runtime_soil.mkdir(parents=True, exist_ok=True)
+            dssat_dir = root / "dssat_case"
+            dssat_dir.mkdir(parents=True, exist_ok=True)
+
+            output_path = case_runtime.ensure_local_dssatpro(dssat_dir, runtime_genotype, runtime_root)
+
+            self.assertEqual(output_path, runtime_root / "DSSATPRO.v48")
+            written = output_path.read_text(encoding="utf-8", errors="ignore")
+            self.assertIn(f"CRD {case_runtime._to_dssatpro_path(runtime_genotype)}", written)
+            self.assertIn(f"WED {case_runtime._to_dssatpro_path(runtime_weather)}", written)
+            self.assertIn(f"SLD {case_runtime._to_dssatpro_path(runtime_soil)}", written)
+            if source_profile.exists() and source_profile.stat().st_size > 0:
+                self.assertNotIn(f"WED {case_runtime._to_dssatpro_path(dssat_dir)}", written)
+
+    def test_candidate_genotype_sources_includes_siblings_of_cul_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dssat_dir = root / "case"
+            dssat_dir.mkdir(parents=True, exist_ok=True)
+            geno_dir = root / "GENOTYPE"
+            geno_dir.mkdir(parents=True, exist_ok=True)
+            cul_path = geno_dir / "SBGRO048.CUL"
+            cul_path.write_text("x", encoding="utf-8")
+            eco_path = geno_dir / "SBGRO048.ECO"
+            eco_path.write_text("x", encoding="utf-8")
+            sources = case_runtime.candidate_genotype_sources(ROOT, dssat_dir, "SBGRO048", ".ECO", cul_path)
+            self.assertIn(eco_path.resolve(), [p.resolve() for p in sources])
+
+    def test_prepare_runtime_dir_copies_weather_from_root_and_creates_runtime_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dssat_dir = root / "dssat_case"
+            dssat_root = root / "DSSAT48"
+            runtime_root = root / "runtime"
+            runtime_genotype = runtime_root / "Genotype"
+            live_filex = dssat_dir / "SWSW7501.WHX"
+            base = dssat_dir / "SWSW7501_BASE.WHX"
+            weather_root = dssat_root / "Weather"
+            soil_root = dssat_root / "Soil"
+            dssat_dir.mkdir(parents=True, exist_ok=True)
+            runtime_genotype.mkdir(parents=True, exist_ok=True)
+            weather_root.mkdir(parents=True, exist_ok=True)
+            soil_root.mkdir(parents=True, exist_ok=True)
+            live_filex.write_text("*X", encoding="utf-8")
+            base.write_text("*B", encoding="utf-8")
+            (runtime_genotype / "WHCER048.CUL").write_text("CUL", encoding="utf-8")
+            (runtime_genotype / "WHCER048.ECO").write_text("ECO", encoding="utf-8")
+            (runtime_genotype / "WHCER048.SPE").write_text("SPE", encoding="utf-8")
+            (dssat_dir / "DSSAT48.INP").write_text(
+                "CULTIVAR     WHCER048.CUL     C:\\DSSAT48\\Genotype\\\n",
+                encoding="utf-8",
+            )
+            (dssat_dir / "DSSAT48.INH").write_text(
+                "WHCER048.CUL                 C:\\DSSAT48\\Genotype\\\n",
+                encoding="utf-8",
+            )
+            (weather_root / "SWSW7501.WTH").write_text("WEATHER", encoding="utf-8")
+            (soil_root / "SOIL.SOL").write_text("SOIL", encoding="utf-8")
+
+            with patch.object(run_model, "resolve_dssat_root", return_value=dssat_root):
+                run_model._prepare_runtime_dir(runtime_root, dssat_dir, live_filex, base, runtime_genotype)
+
+            self.assertTrue((runtime_root / "SWSW7501.WTH").exists())
+            self.assertTrue((runtime_root / "Weather" / "SWSW7501.WTH").exists())
+            self.assertTrue((runtime_root / "Weather" / "SWSW7501.WHT").exists())
+            self.assertTrue((runtime_root / "Soil" / "SOIL.SOL").exists())
+            self.assertTrue((runtime_root / "WHCER048.CUL").exists())
+            self.assertTrue((runtime_root / "WHCER048.ECO").exists())
+            self.assertTrue((runtime_root / "WHCER048.SPE").exists())
+            runtime_inp = (runtime_root / "DSSAT48.INP").read_text(encoding="utf-8", errors="ignore")
+            self.assertNotIn("C:\\DSSAT48\\Genotype\\", runtime_inp)
+            runtime_inh = (runtime_root / "DSSAT48.INH").read_text(encoding="utf-8", errors="ignore")
+            self.assertNotIn("C:\\DSSAT48\\Genotype\\", runtime_inh)
+            runtime_profile = (runtime_root / "DSSATPRO.v48").read_text(encoding="utf-8")
+            self.assertIn(case_runtime._to_dssatpro_path(runtime_genotype), runtime_profile)
+            self.assertIn(case_runtime._to_dssatpro_path(runtime_root / "Weather"), runtime_profile)
+            self.assertIn(case_runtime._to_dssatpro_path(runtime_root / "Soil"), runtime_profile)
+
+    def test_prepare_runtime_dir_promotes_case_wht_to_runtime_wth(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dssat_dir = root / "dssat_case"
+            dssat_root = root / "DSSAT48"
+            runtime_root = root / "runtime"
+            runtime_genotype = runtime_root / "Genotype"
+            live_filex = dssat_dir / "SWSW7501.WHX"
+            base = dssat_dir / "SWSW7501_BASE.WHX"
+            dssat_dir.mkdir(parents=True, exist_ok=True)
+            runtime_genotype.mkdir(parents=True, exist_ok=True)
+            live_filex.write_text("*X", encoding="utf-8")
+            base.write_text("*B", encoding="utf-8")
+            (dssat_dir / "SWSW7501.WHT").write_text("CASE_WEATHER", encoding="utf-8")
+            (dssat_root / "Weather").mkdir(parents=True, exist_ok=True)
+            (dssat_root / "Soil").mkdir(parents=True, exist_ok=True)
+
+            with patch.object(run_model, "resolve_dssat_root", return_value=dssat_root):
+                run_model._prepare_runtime_dir(runtime_root, dssat_dir, live_filex, base, runtime_genotype)
+
+            self.assertTrue((runtime_root / "SWSW7501.WHT").exists())
+            self.assertTrue((runtime_root / "SWSW7501.WTH").exists())
+            self.assertTrue((runtime_root / "Weather" / "SWSW7501.WTH").exists())
+
+    def test_rewrite_cul_values_updates_fixed_width_columns_using_header_starts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cul_path = Path(tmp) / "WHCER048.CUL"
+            row = "IB1500 MANITOU           1,14 CAWH0117.080 34.90 477.6 12.87 62.22 2.215 80.00"
+            p1v_start = row.index("17.080")
+            header_chars = [" "] * (p1v_start + (6 * 7) + 2)
+            header_chars[0] = "@"
+            fixed_cols = ["P1V", "P1D", "P5", "G1", "G2", "G3", "PHINT"]
+            for idx, name in enumerate(fixed_cols):
+                start = p1v_start + (6 * idx)
+                for j, ch in enumerate(name):
+                    header_chars[start + j] = ch
+            header = "".join(header_chars).rstrip()
+            cul_path.write_text(
+                "\n".join(
+                    [
+                        "*CULTIVARS",
+                        header,
+                        row,
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            from dssat_io import rewrite_cul_values
+
+            rewrite_cul_values(cul_path, "IB1500", {"G2": 20.0, "G3": 0.5})
+            row = next(
+                (
+                    line
+                    for line in cul_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+                    if line.startswith("IB1500")
+                ),
+                "",
+            )
+            self.assertIn(" 20.00", row)
+            self.assertIn(" 0.500", row)
+
     def test_parse_inp_cultivar_reference_extracts_file_and_dir(self) -> None:
         lines = [
             "SPECIES      WHCER048.SPE     C:\\DSSAT48\\Genotype\\",
@@ -3385,6 +3536,12 @@ class TestCaseRuntimeResolution(unittest.TestCase):
 
         self.assertEqual(cul_name, "WHCER048.CUL")
         self.assertEqual(cul_dir, "C:\\DSSAT48\\Genotype\\")
+
+    def test_pick_eval_value_does_not_use_precipitation_as_yield_fallback(self) -> None:
+        from dssat_io import pick_eval_value
+
+        row = {"HWAM": "-99", "PRCM": "209", "HWUM": "-99", "CWAM": "-99", "HWAH": "-99"}
+        self.assertIsNone(pick_eval_value(row, "HWAM", prefer_suffix=""))
 
     def test_infer_cul_path_from_inp_prefers_local_genotype_copy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3595,6 +3752,40 @@ class TestCaseRuntimeResolution(unittest.TestCase):
             self.assertEqual(tokens[5], "4.25")
             self.assertEqual(tokens[8], "24.50")
             self.assertEqual(tokens[9], "1.750")
+
+    def test_rewrite_cul_values_can_repair_malformed_wheat_row_using_template(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cul_path = Path(tmp) / "WHCER048.CUL"
+            cul_path.write_text(
+                "".join(
+                    [
+                        "*CULTIVARS:WHCER048\n",
+                        "@VAR#  VAR-NAME........  EXP#   ECO#   P1V   P1D    P5    G1    G2    G3 PHINT\n",
+                        "DFAULT DEFAULT              . DFAULT     5    75   450    30    35   1.0    60\n",
+                        "IB1500 MANITOU           1,14 CAWH0117.080 9.330 3.12  331.4 12.87 62.22        2.215\n",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            dssat_io.rewrite_cul_values(
+                cul_path,
+                "IB1500",
+                {"P1V": 34.9, "P1D": 477.6, "P5": 12.87, "G1": 62.22, "G2": 2.22, "G3": 80.0, "PHINT": 128.05},
+            )
+
+            row = next(line for line in cul_path.read_text(encoding="utf-8").splitlines() if line.startswith("IB1500"))
+            tokens = row.split()
+            self.assertEqual(tokens[0], "IB1500")
+            self.assertEqual(tokens[1], "MANITOU")
+            self.assertEqual(tokens[3], "CAWH01")
+            self.assertEqual(tokens[4], "34.900")
+            self.assertEqual(tokens[5], "477.60")
+            self.assertEqual(tokens[6], "12.9")
+            self.assertEqual(tokens[7], "62.22")
+            self.assertEqual(tokens[8], "2.22")
+            self.assertEqual(tokens[9], "80.000")
+            self.assertEqual(tokens[10], "128.05")
 
     def test_ensure_case_files_writes_registry_parameter_order_into_params_and_tpl(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -4412,6 +4603,7 @@ class TestCaseRuntimeResolution(unittest.TestCase):
                 ),
                 patch.object(run_model, "_extract_cultivar_code", return_value="CV01"),
                 patch.object(run_model, "patch_cultivar_dir_in_inp_inh"),
+                patch.object(run_model, "ensure_local_dssatpro") as ensure_local_dssatpro_mock,
                 patch.object(run_model, "resolve_case_runtime", side_effect=capture_runtime),
                 patch.object(run_model, "resolve_runtime_file_state", return_value=file_state),
             ):
@@ -4434,6 +4626,11 @@ class TestCaseRuntimeResolution(unittest.TestCase):
             self.assertEqual(captured["trts"], [3, 4])
             self.assertEqual(captured["params"], {"g1": 12.0})
             self.assertEqual(captured["param_map"], {"p1v": "g1"})
+            ensure_local_dssatpro_mock.assert_called_once_with(
+                dssat_dir,
+                Path(r"d:\tmp\runtime\GENOTYPE"),
+                Path(r"d:\tmp\runtime"),
+            )
             self.assertEqual(
                 captured["kwargs"],
                 {
@@ -4510,6 +4707,7 @@ class TestCaseRuntimeResolution(unittest.TestCase):
                 ),
                 patch.object(run_model, "_extract_cultivar_code", return_value="CV01"),
                 patch.object(run_model, "patch_cultivar_dir_in_inp_inh"),
+                patch.object(run_model, "ensure_local_dssatpro"),
                 patch.object(run_model, "resolve_case_runtime", return_value=runtime),
                 patch.object(run_model, "resolve_runtime_file_state", return_value=file_state),
             ):

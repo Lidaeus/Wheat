@@ -65,6 +65,7 @@ __all__ = [
     "resolve_input_plan",
     "resolve_runtime_file_state",
     "resolve_case_runtime",
+    "ensure_local_dssatpro",
 ]
 
 
@@ -169,12 +170,16 @@ def candidate_genotype_sources(
     cul_path: Path,
 ) -> list[Path]:
     file_name = f"{base_name}{suffix}"
+    legacy_root = Path(r"C:\DSSAT48")
     candidates = [
         cul_path if suffix.upper() == ".CUL" else None,
+        cul_path.parent / file_name if cul_path else None,
         dssat_dir / "GENOTYPE" / file_name,
         project_root / "scripts" / "dssat_case" / "GENOTYPE" / file_name,
         project_root.parent / "autoresearch_sandbox" / "dssat_case" / "GENOTYPE" / file_name,
         resolve_dssat_genotype_dir(project_root) / file_name,
+        legacy_root / "Genotype" / file_name,
+        legacy_root / "GENOTYPE" / file_name,
     ]
     return dedupe_paths([path for path in candidates if path is not None])
 
@@ -243,16 +248,19 @@ def parse_inp_cultivar_reference(lines: list[str]) -> tuple[str | None, str | No
     cul_file_name = None
     cul_src_dir = None
     for raw in lines:
-        if not raw.startswith("CULTIVAR"):
+        cleaned = raw.replace("\x00", "").strip()
+        if not cleaned.startswith("CULTIVAR"):
             continue
-        if ".CUL" not in raw.upper():
+        if ".CUL" not in cleaned.upper():
             continue
-        for token in raw.split():
+        for token in cleaned.split():
             if token.upper().endswith(".CUL"):
                 cul_file_name = token.strip()
                 break
-        if "C:\\" in raw:
-            cul_src_dir = raw[raw.index("C:\\") :].strip()
+        import re
+        drive_match = re.search(r"[A-Za-z]:\\", cleaned)
+        if drive_match:
+            cul_src_dir = cleaned[drive_match.start() :].strip()
         break
     return cul_file_name, cul_src_dir
 
@@ -280,8 +288,8 @@ def infer_cul_path_from_inp(dssat_dir: Path, cfg: dict) -> Path | None:
         try:
             src = (Path(cul_src_dir) / cul_file_name).resolve()
         except Exception:
-            return None
-        if src.exists():
+            src = None
+        if src and src.exists():
             return src
 
     return None
@@ -298,6 +306,10 @@ def resolve_cultivar_path(
     if cul_env:
         return Path(cul_env)
 
+    inferred = infer_cul_path_from_inp(dssat_dir, cfg)
+    if inferred is not None:
+        return inferred
+
     geno_dir = dssat_dir / "GENOTYPE"
     in_case_culs = sorted(geno_dir.glob("*.CUL")) if geno_dir.exists() else []
     cfg_paths = cfg.get("paths", {})
@@ -310,10 +322,6 @@ def resolve_cultivar_path(
             resolved_cfg_cul = resolve_dssat_root(project_root or Path.cwd(), cfg=cfg) / resolved_cfg_cul
         if resolved_cfg_cul.exists():
             return resolved_cfg_cul
-
-    inferred = infer_cul_path_from_inp(dssat_dir, cfg)
-    if inferred is not None:
-        return inferred
 
     fallback_cultivar = resolve_crop_profile_from_context(cfg, dssat_dir).cultivar_file
     genotype_dir = resolve_dssat_genotype_dir(project_root or dssat_dir.parent, cfg=cfg)
@@ -363,27 +371,164 @@ def ensure_local_runtime(
     src_exe = resolve_dssat_exe_path(project_root, cfg=cfg, env_dssat_exe=env_dssat_exe)
     runtime_exe = runtime_root / src_exe.name
     if src_exe.exists():
-        need_copy = not runtime_exe.exists()
-        if not need_copy:
+        need_copy = True
+        if runtime_exe.exists():
             try:
-                need_copy = runtime_exe.stat().st_size != src_exe.stat().st_size
+                src_stat = src_exe.stat()
+                dst_stat = runtime_exe.stat()
+                need_copy = (dst_stat.st_size != src_stat.st_size) or (dst_stat.st_mtime < src_stat.st_mtime)
             except Exception:
                 need_copy = True
         if need_copy:
             shutil.copy2(src_exe, runtime_exe)
 
+    src_dssatpro = project_root / "DSSATPRO.v48"
+    if src_dssatpro.exists() and src_dssatpro.stat().st_size > 0:
+        dst_dssatpro = runtime_root / "DSSATPRO.v48"
+        need_copy = True
+        if dst_dssatpro.exists():
+            try:
+                src_stat = src_dssatpro.stat()
+                dst_stat = dst_dssatpro.stat()
+                need_copy = (dst_stat.st_size != src_stat.st_size) or (dst_stat.st_mtime < src_stat.st_mtime)
+            except Exception:
+                need_copy = True
+        if need_copy:
+            shutil.copy2(src_dssatpro, dst_dssatpro)
+
     base_name = cul_path.stem
     for suffix in (".CUL", ".ECO", ".SPE"):
         target = runtime_genotype / f"{base_name}{suffix}"
-        if target.exists() and target.stat().st_size > 0:
-            continue
-        for src in candidate_genotype_sources(project_root, dssat_dir, base_name, suffix, cul_path):
-            if not src.exists() or src.stat().st_size <= 0:
-                continue
-            shutil.copy2(src, target)
-            break
+        file_name = f"{base_name}{suffix}"
+        src_candidate = next(
+            (
+                src
+                for src in candidate_genotype_sources(project_root, dssat_dir, base_name, suffix, cul_path)
+                if src.exists() and src.stat().st_size > 0
+            ),
+            None,
+        )
+        if src_candidate is None:
+            searched = [str(p) for p in candidate_genotype_sources(project_root, dssat_dir, base_name, suffix, cul_path)]
+            raise FileNotFoundError(
+                f"Missing genotype support file '{file_name}'. "
+                f"Searched={searched}"
+            )
+        need_copy = True
+        if target.exists():
+            try:
+                src_stat = src_candidate.stat()
+                dst_stat = target.stat()
+                need_copy = (dst_stat.st_size != src_stat.st_size) or (dst_stat.st_mtime < src_stat.st_mtime)
+            except Exception:
+                need_copy = True
+        if need_copy:
+            shutil.copy2(src_candidate, target)
 
     return runtime_exe, runtime_genotype
+
+
+DSSATPRO_TEMPLATE = """*** *  DSSAT PROFILE * ***
+DDB {root}
+DTB {root}
+DTE {root}
+DTO {root}
+DAT {root}
+DPT {root}
+DIM {root}
+DTP {root}
+DPF {root}
+DFO {root}
+DIS {root}
+DDW {root}
+DWG {root}
+DWC {root}
+DDS {root}
+DTS {root}
+DDG {root}
+DCG {root}\\TOOLS\\GENCALC GENCALC2.EXE
+DGL {root}\\TOOLS\\GLUE GLUE.BAT
+DPM {root}
+DDE {root}
+TOG {root}\\TOOLS\\GBUILD GBUILD.EXE
+WED {wed}
+SLD {sld}
+CRD {crd}
+"""
+
+
+def _to_dssatpro_path(p: Path) -> str:
+    import os
+    p_abs = os.path.abspath(str(p))
+    drive, rest = os.path.splitdrive(p_abs)
+    rest = rest.replace("/", "\\")
+    if not rest.startswith("\\"):
+        rest = "\\" + rest
+    return f"{drive} {rest}"
+
+
+def _from_dssatpro_path(s: str) -> Path | None:
+    s = str(s or "").strip()
+    if not s:
+        return None
+    m = re.match(r"^([A-Za-z]:)\s+(\\.+)$", s)
+    if not m:
+        return None
+    import os
+    return Path(os.path.normpath(m.group(1) + m.group(2)))
+
+
+def _resolve_profile_dir(preferred: Path, fallback: Path) -> Path:
+    if preferred.exists():
+        return preferred
+    return fallback
+
+
+def ensure_local_dssatpro(dssat_dir: Path, runtime_genotype: Path, runtime_root: Path) -> Path:
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    dssatpro_path = runtime_root / "DSSATPRO.v48"
+    project_root = Path(__file__).resolve().parents[1]
+    source_profile = project_root / "DSSATPRO.v48"
+
+    runtime_weather = _resolve_profile_dir(runtime_root / "Weather", runtime_root)
+    runtime_soil = _resolve_profile_dir(runtime_root / "Soil", dssat_dir / "Soil")
+    crd_text = _to_dssatpro_path(runtime_genotype)
+    wed_text = _to_dssatpro_path(runtime_weather)
+    sld_text = _to_dssatpro_path(runtime_soil)
+    if source_profile.exists() and source_profile.stat().st_size > 0:
+        shutil.copy2(source_profile, dssatpro_path)
+        raw_lines = dssatpro_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        out_lines: list[str] = []
+        replaced_crd = False
+        replaced_wed = False
+        replaced_sld = False
+        for line in raw_lines:
+            upper_line = line.strip().upper()
+            if upper_line.startswith("CRD "):
+                out_lines.append(f"CRD {crd_text}")
+                replaced_crd = True
+            elif upper_line.startswith("WED "):
+                out_lines.append(f"WED {wed_text}")
+                replaced_wed = True
+            elif upper_line.startswith("SLD "):
+                out_lines.append(f"SLD {sld_text}")
+                replaced_sld = True
+            else:
+                out_lines.append(line)
+        if not replaced_crd:
+            out_lines.append(f"CRD {crd_text}")
+        if not replaced_wed:
+            out_lines.append(f"WED {wed_text}")
+        if not replaced_sld:
+            out_lines.append(f"SLD {sld_text}")
+        dssatpro_path.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+        return dssatpro_path
+
+    root_text = _to_dssatpro_path(runtime_root)
+    crd_fallback = _to_dssatpro_path(runtime_genotype)
+    content = DSSATPRO_TEMPLATE.format(root=root_text, wed=wed_text, sld=sld_text, crd=crd_fallback)
+    dssatpro_path.write_text(content, encoding="utf-8")
+    return dssatpro_path
 
 
 def resolve_adapter_paths(dssat_dir: Path, cfg: dict) -> tuple[list, list, Path | None, Path | None]:
