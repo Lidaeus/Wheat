@@ -758,7 +758,6 @@ def rewrite_cul_values(cul_path: Path, cultivar_code: str, updates: dict[str, fl
             ending = _line_ending(line)
             row_chars = list(row_text)
             changed = False
-            applied_before = len(applied_keys)
 
             has_fixed_block_header = header_cols is not None and all(col in header_cols for col in fixed_numeric_order)
             if template_numeric_start is not None and has_fixed_block_header and any(col in updates_u for col in fixed_numeric_order):
@@ -815,6 +814,71 @@ def rewrite_cul_values(cul_path: Path, cultivar_code: str, updates: dict[str, fl
                         changed = True
                         applied_keys.add(col)
 
+            if header_cols and "ECO#" in header_cols:
+                eco_index = header_cols.index("ECO#")
+                numeric_cols = header_cols[eco_index + 1 :]
+                numeric_cols_set = {_normalize_cul_col_name(c) for c in numeric_cols}
+                if "G4" in updates_u and "G4" not in numeric_cols_set and "G3" in numeric_cols_set:
+                    out_cols: list[str] = []
+                    for c in numeric_cols:
+                        out_cols.append(c)
+                        if _normalize_cul_col_name(c) == "G3":
+                            out_cols.append("G4")
+                    numeric_cols = out_cols
+                    numeric_cols_set = {_normalize_cul_col_name(c) for c in numeric_cols}
+
+                token_matches = list(re.finditer(r"\S+", row_text))
+                tail_count = len(numeric_cols)
+                has_numeric_tail = tail_count > 0 and len(token_matches) >= tail_count + 1
+                touches_numeric_tail = any(_normalize_cul_col_name(k) in numeric_cols_set for k in updates_u)
+                if has_numeric_tail and touches_numeric_tail:
+                    header_alignment_mismatch = False
+                    if header_starts and header_template_len is not None:
+                        desired_len = max(len(row_text), int(header_template_len))
+                        desired_len = max(desired_len, max(int(s) for s in header_starts) + 1)
+                        padded_row = row_text.ljust(desired_len)
+                        bounds = _row_bounds_for_starts(padded_row, header_starts)
+                        first_numeric_idx = eco_index + 1
+                        if first_numeric_idx < len(bounds):
+                            a, b = bounds[first_numeric_idx]
+                            fixed_sub = padded_row[a:b].strip()
+                            token0 = token_matches[-tail_count].group(0)
+                            try:
+                                header_alignment_mismatch = float(fixed_sub) != float(token0)
+                            except ValueError:
+                                header_alignment_mismatch = fixed_sub != token0
+
+                    use_tail_tokens = header_alignment_mismatch or (len(token_matches) < len(header_cols))
+                    if use_tail_tokens:
+                        tail_matches = token_matches[-tail_count:]
+                        for idx, col in enumerate(numeric_cols):
+                            norm_col = _normalize_cul_col_name(col)
+                            new_val_opt: float | None = next(
+                                (v for k, v in updates_u.items() if _normalize_cul_col_name(k) == norm_col),
+                                None,
+                            )
+                            if new_val_opt is None:
+                                continue
+                            m = tail_matches[idx]
+                            a, b = int(m.start()), int(m.end())
+                            width = b - a
+                            if width <= 0:
+                                continue
+                            existing = row_text[a:b]
+                            try:
+                                formatted = _format_like_existing(existing, width, float(new_val_opt))
+                            except ValueError:
+                                continue
+                            if len(formatted) < width:
+                                formatted = formatted + (" " * (width - len(formatted)))
+                            row_chars[a:b] = list(formatted[:width])
+                            applied_keys.add(norm_col)
+                            changed = True
+                        if changed:
+                            out_lines.append("".join(row_chars) + ending)
+                            updated = True
+                            continue
+
             if header_starts:
                 original_row_text = row_text
                 desired_len = len(row_text)
@@ -866,53 +930,6 @@ def rewrite_cul_values(cul_path: Path, cultivar_code: str, updates: dict[str, fl
                     out_lines.append("".join(row_chars) + ending)
                     updated = True
                     continue
-
-            if header_cols and "ECO#" in header_cols and len(applied_keys) == applied_before:
-                token_matches = list(re.finditer(r"\S+", row_text))
-                if len(token_matches) < len(header_cols):
-                    eco_index = header_cols.index("ECO#")
-                    numeric_cols = header_cols[eco_index + 1 :]
-                    numeric_cols_set = {_normalize_cul_col_name(c) for c in numeric_cols}
-                    if "G4" in updates_u and "G4" not in numeric_cols_set and "G3" in numeric_cols_set:
-                        out_cols: list[str] = []
-                        for c in numeric_cols:
-                            out_cols.append(c)
-                            if _normalize_cul_col_name(c) == "G3":
-                                out_cols.append("G4")
-                        numeric_cols = out_cols
-                        numeric_cols_set = {_normalize_cul_col_name(c) for c in numeric_cols}
-
-                    if numeric_cols and any(_normalize_cul_col_name(k) in numeric_cols_set for k in updates_u):
-                        tail_count = len(numeric_cols)
-                        if len(token_matches) >= tail_count:
-                            tail_matches = token_matches[-tail_count:]
-                            for idx, col in enumerate(numeric_cols):
-                                norm_col = _normalize_cul_col_name(col)
-                                new_val_opt: float | None = next(
-                                    (v for k, v in updates_u.items() if _normalize_cul_col_name(k) == norm_col),
-                                    None,
-                                )
-                                if new_val_opt is None:
-                                    continue
-                                m = tail_matches[idx]
-                                a, b = int(m.start()), int(m.end())
-                                width = b - a
-                                if width <= 0:
-                                    continue
-                                existing = row_text[a:b]
-                                try:
-                                    formatted = _format_like_existing(existing, width, float(new_val_opt))
-                                except ValueError:
-                                    continue
-                                if len(formatted) < width:
-                                    formatted = formatted + (" " * (width - len(formatted)))
-                                row_chars[a:b] = list(formatted[:width])
-                                applied_keys.add(norm_col)
-                                changed = True
-                            if changed:
-                                out_lines.append("".join(row_chars) + ending)
-                                updated = True
-                                continue
 
             row_matches = list(re.finditer(r"\S+", row_text))
             if len(row_matches) < len(header_cols):

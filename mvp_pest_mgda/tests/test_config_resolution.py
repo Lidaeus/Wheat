@@ -3837,6 +3837,26 @@ class TestCaseRuntimeResolution(unittest.TestCase):
             row = next(line for line in cul_path.read_text(encoding="utf-8").splitlines() if line.startswith("IB0035"))
             self.assertIn("228", row)
 
+    def test_rewrite_cul_values_cropgro_uses_tail_tokens_when_header_spacing_misaligned(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cul_path = Path(tmp) / "SBGRO048.CUL"
+            cul_path.write_text(
+                "".join(
+                    [
+                        "*CULTIVARS:SBGRO048\n",
+                        "@VAR#  VAR-NAME........ EXPNO   ECO#  CSDL PPSEN EM-FL FL-SH FL-SD SD-PM FL-LF LFMAX SLAVR SIZLF  XFRT WTPSD SFDUR SDPDV PODUR THRSH SDPRO SDLIP\n",
+                        "IB0002 COBB (8)             . SB0801 11.78 0.349  21.0   9.4  16.0 37.20 19.00 1.400   393 199.6  1.28 0.191  20.8  2.13   6.6  81.8  0.47  0.34\n",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            dssat_io.rewrite_cul_values(cul_path, "IB0002", {"CSDL": 13.19, "XFRT": 1.07205})
+            row = next(line for line in cul_path.read_text(encoding="utf-8").splitlines() if line.startswith("IB0002"))
+            tail = row.split()[-18:]
+            self.assertEqual(tail[0], "13.19")
+            self.assertEqual(tail[10], "1.07")
+
     def test_ensure_case_files_writes_registry_parameter_order_into_params_and_tpl(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
