@@ -31,14 +31,21 @@ class AggregateMetricRecord:
     split: str
     metric: str
     count: int
+    rmse: float
+    mae: float
     nrmse: float
     bias: float
+    pearson_r: float
+    nse: float
+    d1: float
+    wcs: float
 
 
 @dataclass(frozen=True)
 class AggregateView:
     split: str
     mean_nrmse: float
+    wcs: float
 
 
 @dataclass(frozen=True)
@@ -55,6 +62,9 @@ class MatrixSummaryView:
     train_mean_nrmse: float
     valid_mean_nrmse: float
     all_mean_nrmse: float
+    train_wcs: float
+    valid_wcs: float
+    all_wcs: float
     train_primary_nrmse: float
     train_primary_bias: float
     valid_primary_nrmse: float
@@ -118,8 +128,14 @@ class AggregateMetricExportRow:
     split: str
     metric: str
     count: int
+    rmse: float
+    mae: float
     nrmse: float
     bias: float
+    pearson_r: float
+    nse: float
+    d1: float
+    wcs: float
 
 
 TREATMENT_METRIC_EXPORT_FIELDNAMES = [
@@ -154,8 +170,14 @@ AGGREGATE_METRIC_EXPORT_FIELDNAMES = [
     "split",
     "metric",
     "count",
+    "rmse",
+    "mae",
     "nrmse",
     "bias",
+    "pearson_r",
+    "nse",
+    "d1",
+    "wcs",
 ]
 
 
@@ -308,6 +330,10 @@ def build_split_mean_name(split: str) -> str:
     return f"{str(split).strip().upper()}_MEAN_NRMSE"
 
 
+def build_split_score_name(split: str, stat: str) -> str:
+    return f"{str(split).strip().upper()}_{str(stat).strip().upper()}"
+
+
 def build_split_metric_name(split: str, metric: str, stat: str) -> str:
     return f"{str(split).strip().upper()}_{metric_key(metric).upper()}_{str(stat).strip().upper()}"
 
@@ -400,11 +426,85 @@ def _safe_mean(values: list[float]) -> float:
     return float(sum(values) / len(values))
 
 
+def _clip01(value: float) -> float:
+    v = float(value)
+    if not math.isfinite(v):
+        return float("nan")
+    if v < 0.0:
+        return 0.0
+    if v > 1.0:
+        return 1.0
+    return v
+
+
+def _single_metric_rmse(obs_values: list[float], sim_values: list[float]) -> float:
+    if not obs_values:
+        return float("nan")
+    mse = sum((obs - sim) ** 2 for obs, sim in zip(obs_values, sim_values)) / len(obs_values)
+    return float(math.sqrt(mse))
+
+
+def _single_metric_mae(obs_values: list[float], sim_values: list[float]) -> float:
+    if not obs_values:
+        return float("nan")
+    return float(sum(abs(obs - sim) for obs, sim in zip(obs_values, sim_values)) / len(obs_values))
+
+
+def _single_metric_pearson_r(obs_values: list[float], sim_values: list[float]) -> float:
+    if len(obs_values) < 2:
+        return float("nan")
+    mean_obs = _safe_mean(obs_values)
+    mean_sim = _safe_mean(sim_values)
+    x = [obs - mean_obs for obs in obs_values]
+    y = [sim - mean_sim for sim in sim_values]
+    var_x = sum(v * v for v in x)
+    var_y = sum(v * v for v in y)
+    if var_x <= 0.0 or var_y <= 0.0:
+        return float("nan")
+    cov = sum(a * b for a, b in zip(x, y))
+    return float(cov / math.sqrt(var_x * var_y))
+
+
+def _single_metric_nse(obs_values: list[float], sim_values: list[float]) -> float:
+    if len(obs_values) < 2:
+        return float("nan")
+    mean_obs = _safe_mean(obs_values)
+    sse = sum((sim - obs) ** 2 for obs, sim in zip(obs_values, sim_values))
+    sst = sum((obs - mean_obs) ** 2 for obs in obs_values)
+    if sst <= 0.0:
+        return float("nan")
+    return float(1.0 - (sse / sst))
+
+
+def _single_metric_d1(obs_values: list[float], sim_values: list[float]) -> float:
+    if not obs_values:
+        return float("nan")
+    mean_obs = _safe_mean(obs_values)
+    num = sum(abs(sim - obs) for obs, sim in zip(obs_values, sim_values))
+    denom = sum(abs(sim - mean_obs) + abs(obs - mean_obs) for obs, sim in zip(obs_values, sim_values))
+    if denom <= 1e-12:
+        return 1.0 if num <= 1e-12 else float("nan")
+    return float(1.0 - (num / denom))
+
+
+def _metric_wcs_score(pearson_r: float, nse: float, d1: float) -> float:
+    parts: list[float] = []
+    r_norm = _clip01(max(0.0, float(pearson_r))) if math.isfinite(float(pearson_r)) else float("nan")
+    nse_norm = _clip01(max(0.0, float(nse))) if math.isfinite(float(nse)) else float("nan")
+    d1_norm = _clip01(float(d1)) if math.isfinite(float(d1)) else float("nan")
+    for v in (r_norm, nse_norm, d1_norm):
+        if math.isfinite(float(v)):
+            parts.append(float(v))
+    if not parts:
+        return float("nan")
+    return float(sum(parts) / len(parts))
+
+
 def _single_metric_nrmse(obs_values: list[float], sim_values: list[float]) -> float:
     if not obs_values:
         return float("nan")
     mse = sum((obs - sim) ** 2 for obs, sim in zip(obs_values, sim_values)) / len(obs_values)
-    denom = _safe_mean([abs(value) for value in obs_values]) + 1e-8
+    denom = abs(_safe_mean(obs_values)) + 1e-8
     return float(math.sqrt(mse) / denom)
 
 
@@ -439,8 +539,27 @@ def build_evaluation_result(
     comparable = [metric_key(name) for name in comparable_metrics if metric_key(name)]
     aggregate_metrics: list[AggregateMetricRecord] = []
     aggregate_views: dict[str, AggregateView] = {}
+    weight_bucket_phenology = {"adap", "mdap"}
+    weight_bucket_yield = {"hwam", "hwum"}
+    weight_bucket_biomass = {"laix", "cwam"}
+    comparable_set = set(comparable)
+    weights_by_metric: dict[str, float] = {}
+    phenology_present = sorted(comparable_set.intersection(weight_bucket_phenology))
+    yield_present = sorted(comparable_set.intersection(weight_bucket_yield))
+    biomass_present = sorted(comparable_set.intersection(weight_bucket_biomass))
+    if phenology_present:
+        for m in phenology_present:
+            weights_by_metric[m] = 0.40 / len(phenology_present)
+    if yield_present:
+        for m in yield_present:
+            weights_by_metric[m] = 0.35 / len(yield_present)
+    if biomass_present:
+        for m in biomass_present:
+            weights_by_metric[m] = 0.25 / len(biomass_present)
     for split in ("train", "valid", "all"):
         metric_scores: list[float] = []
+        wcs_num = 0.0
+        wcs_den = 0.0
         split_trts = _split_trts(normalized_metrics, split_by_trt, split)
         for metric in comparable:
             obs_values: list[float] = []
@@ -454,21 +573,38 @@ def build_evaluation_result(
                     continue
                 obs_values.append(float(obs_value))
                 sim_values.append(float(sim_value))
+            rmse = _single_metric_rmse(obs_values, sim_values)
+            mae = _single_metric_mae(obs_values, sim_values)
             nrmse = _single_metric_nrmse(obs_values, sim_values)
             bias = _single_metric_bias(obs_values, sim_values)
+            pearson_r = _single_metric_pearson_r(obs_values, sim_values)
+            nse = _single_metric_nse(obs_values, sim_values)
+            d1 = _clip01(_single_metric_d1(obs_values, sim_values))
+            wcs = _metric_wcs_score(pearson_r, nse, d1)
             if math.isfinite(nrmse):
                 metric_scores.append(float(nrmse))
+            w = float(weights_by_metric.get(metric, 0.0))
+            if w > 0.0 and math.isfinite(float(wcs)):
+                wcs_num += w * float(wcs)
+                wcs_den += w
             aggregate_metrics.append(
                 AggregateMetricRecord(
                     split=split,
                     metric=metric,
                     count=len(obs_values),
+                    rmse=rmse,
+                    mae=mae,
                     nrmse=nrmse,
                     bias=bias,
+                    pearson_r=pearson_r,
+                    nse=nse,
+                    d1=d1,
+                    wcs=wcs,
                 )
             )
         mean_nrmse = float(_safe_mean(metric_scores)) if metric_scores else 999.0
-        aggregate_views[split] = AggregateView(split=split, mean_nrmse=mean_nrmse)
+        split_wcs = float(wcs_num / wcs_den) if wcs_den > 0.0 else float("nan")
+        aggregate_views[split] = AggregateView(split=split, mean_nrmse=mean_nrmse, wcs=split_wcs)
     return EvaluationResult(
         metrics_by_trt=normalized_metrics,
         aggregate_views=aggregate_views,
@@ -566,8 +702,14 @@ def build_aggregate_metric_export_rows(
             split=str(record.split).strip().lower(),
             metric=metric_key(record.metric),
             count=int(record.count),
+            rmse=float(record.rmse),
+            mae=float(record.mae),
             nrmse=float(record.nrmse),
             bias=float(record.bias),
+            pearson_r=float(record.pearson_r),
+            nse=float(record.nse),
+            d1=float(record.d1),
+            wcs=float(record.wcs),
         )
         for record in records
     ]
@@ -607,8 +749,14 @@ def build_aggregate_metric_export_value_map(row: AggregateMetricExportRow) -> di
         "split": row.split,
         "metric": row.metric,
         "count": int(row.count),
+        "rmse": float(row.rmse),
+        "mae": float(row.mae),
         "nrmse": float(row.nrmse),
         "bias": float(row.bias),
+        "pearson_r": float(row.pearson_r),
+        "nse": float(row.nse),
+        "d1": float(row.d1),
+        "wcs": float(row.wcs),
     }
 
 
@@ -811,11 +959,24 @@ def iter_aggregate_value_records(result: EvaluationResult) -> list[PestOutputRec
         view = result.aggregate_views.get(split)
         if view is not None:
             records.append(PestOutputRecord(name=build_split_mean_name(split), value=float(view.mean_nrmse)))
+            records.append(PestOutputRecord(name=build_split_score_name(split, "WCS"), value=float(view.wcs)))
     for metric_record in result.aggregate_metrics:
         records.append(
             PestOutputRecord(
                 name=build_split_metric_name(metric_record.split, metric_record.metric, "N"),
                 value=float(metric_record.count),
+            )
+        )
+        records.append(
+            PestOutputRecord(
+                name=build_split_metric_name(metric_record.split, metric_record.metric, "RMSE"),
+                value=float(metric_record.rmse),
+            )
+        )
+        records.append(
+            PestOutputRecord(
+                name=build_split_metric_name(metric_record.split, metric_record.metric, "MAE"),
+                value=float(metric_record.mae),
             )
         )
         records.append(
@@ -828,6 +989,30 @@ def iter_aggregate_value_records(result: EvaluationResult) -> list[PestOutputRec
             PestOutputRecord(
                 name=build_split_metric_name(metric_record.split, metric_record.metric, "BIAS"),
                 value=float(metric_record.bias),
+            )
+        )
+        records.append(
+            PestOutputRecord(
+                name=build_split_metric_name(metric_record.split, metric_record.metric, "R"),
+                value=float(metric_record.pearson_r),
+            )
+        )
+        records.append(
+            PestOutputRecord(
+                name=build_split_metric_name(metric_record.split, metric_record.metric, "NSE"),
+                value=float(metric_record.nse),
+            )
+        )
+        records.append(
+            PestOutputRecord(
+                name=build_split_metric_name(metric_record.split, metric_record.metric, "D1"),
+                value=float(metric_record.d1),
+            )
+        )
+        records.append(
+            PestOutputRecord(
+                name=build_split_metric_name(metric_record.split, metric_record.metric, "WCS"),
+                value=float(metric_record.wcs),
             )
         )
     return records
@@ -848,6 +1033,9 @@ def build_matrix_summary_view(result: EvaluationResult, primary_metric: str) -> 
         train_mean_nrmse=resolve_aggregate_value(result, build_split_mean_name("train")),
         valid_mean_nrmse=resolve_aggregate_value(result, build_split_mean_name("valid")),
         all_mean_nrmse=resolve_aggregate_value(result, build_split_mean_name("all")),
+        train_wcs=resolve_aggregate_value(result, build_split_score_name("train", "WCS")),
+        valid_wcs=resolve_aggregate_value(result, build_split_score_name("valid", "WCS")),
+        all_wcs=resolve_aggregate_value(result, build_split_score_name("all", "WCS")),
         train_primary_nrmse=resolve_aggregate_value(result, build_split_metric_name("train", metric, "NRMSE")),
         train_primary_bias=resolve_aggregate_value(result, build_split_metric_name("train", metric, "BIAS")),
         valid_primary_nrmse=resolve_aggregate_value(result, build_split_metric_name("valid", metric, "NRMSE")),
@@ -873,7 +1061,7 @@ def serialize_evaluation_result(result: EvaluationResult) -> dict:
             for trt, metrics in result.metrics_by_trt.items()
         },
         "aggregate_views": {
-            split: {"split": view.split, "mean_nrmse": float(view.mean_nrmse)}
+            split: {"split": view.split, "mean_nrmse": float(view.mean_nrmse), "wcs": float(view.wcs)}
             for split, view in result.aggregate_views.items()
         },
         "aggregate_metrics": [
@@ -881,8 +1069,14 @@ def serialize_evaluation_result(result: EvaluationResult) -> dict:
                 "split": record.split,
                 "metric": metric_key(record.metric),
                 "count": int(record.count),
+                "rmse": float(record.rmse),
+                "mae": float(record.mae),
                 "nrmse": float(record.nrmse),
                 "bias": float(record.bias),
+                "pearson_r": float(record.pearson_r),
+                "nse": float(record.nse),
+                "d1": float(record.d1),
+                "wcs": float(record.wcs),
             }
             for record in result.aggregate_metrics
         ],
@@ -895,6 +1089,7 @@ def deserialize_evaluation_result(payload: dict) -> EvaluationResult:
         str(split): AggregateView(
             split=str(item.get("split", split)),
             mean_nrmse=float(item.get("mean_nrmse", float("nan"))),
+            wcs=float(item.get("wcs", float("nan"))),
         )
         for split, item in dict(payload.get("aggregate_views", {})).items()
     }
@@ -903,8 +1098,14 @@ def deserialize_evaluation_result(payload: dict) -> EvaluationResult:
             split=str(item.get("split", "")),
             metric=metric_key(item.get("metric", "")),
             count=int(item.get("count", 0)),
+            rmse=float(item.get("rmse", float("nan"))),
+            mae=float(item.get("mae", float("nan"))),
             nrmse=float(item.get("nrmse", float("nan"))),
             bias=float(item.get("bias", float("nan"))),
+            pearson_r=float(item.get("pearson_r", float("nan"))),
+            nse=float(item.get("nse", float("nan"))),
+            d1=float(item.get("d1", float("nan"))),
+            wcs=float(item.get("wcs", float("nan"))),
         )
         for item in list(payload.get("aggregate_metrics", []))
     ]

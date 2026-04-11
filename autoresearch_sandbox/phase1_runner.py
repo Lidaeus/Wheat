@@ -170,11 +170,32 @@ SUMMARY_FIELDS = [
     "run_id", "combo_key", "executed_at", "plan", "weight", "engine", "budget",
     "sequence", "grouping", "status", "score", "delta_vs_b0", "delta_vs_b1", "delta_vs_negative_ref",
     "better_than_b0", "train_mean_nrmse", "valid_mean_nrmse", "all_mean_nrmse",
+    "train_wcs", "valid_wcs", "all_wcs",
     "train_yield_nrmse", "train_yield_bias", "valid_yield_nrmse", "valid_yield_bias",
     "duration_sec", "validation_enabled", "train_trts", "valid_trts", "workspace_dir",
     "eval_call_count", "run_model_invocations", "dssat_treatment_calls", "dssat_wall_sec",
 ]
-AGG_FIELDS = ["run_id", "plan", "weight", "engine", "budget", "sequence", "grouping", "status", "split", "metric", "count", "nrmse", "bias"]
+AGG_FIELDS = [
+    "run_id",
+    "plan",
+    "weight",
+    "engine",
+    "budget",
+    "sequence",
+    "grouping",
+    "status",
+    "split",
+    "metric",
+    "count",
+    "rmse",
+    "mae",
+    "nrmse",
+    "bias",
+    "pearson_r",
+    "nse",
+    "d1",
+    "wcs",
+]
 TRT_FIELDS = ["run_id", "plan", "weight", "engine", "budget", "sequence", "grouping", "status", "trt", "split", "metric", "observed", "simulated", "error", "abs_error", "relative_error"]
 PARAM_FIELDS = ["run_id", "crop", "combo_key", "param_name", "param_value", "lower_bound", "upper_bound", "is_at_lower_bound", "is_at_upper_bound", "normalized_distance_to_b0"]
 FIG_FIELDS = [

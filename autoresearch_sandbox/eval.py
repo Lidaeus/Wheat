@@ -2120,6 +2120,9 @@ def main():
         all_score = 999.0
         final_score = 999.0
         result_schema_view = None
+        train_wcs = float("nan")
+        valid_wcs = float("nan")
+        all_wcs = float("nan")
     else:
         metrics = comparable_evaluation_metrics()
         train_score = score_metrics(final_sim_metrics, metrics, "train")
@@ -2130,6 +2133,9 @@ def main():
         train_score = float(aggregate_values.get("TRAIN_MEAN_NRMSE", train_score))
         valid_score = float(aggregate_values.get("VALID_MEAN_NRMSE", valid_score))
         all_score = float(aggregate_values.get("ALL_MEAN_NRMSE", all_score))
+        train_wcs = float(aggregate_values.get("TRAIN_WCS", float("nan")))
+        valid_wcs = float(aggregate_values.get("VALID_WCS", float("nan")))
+        all_wcs = float(aggregate_values.get("ALL_WCS", float("nan")))
         final_score = valid_score if VALID_TRTS else all_score
 
     print(f"Optimization Success: {res_success}")
@@ -2220,6 +2226,7 @@ def main():
                         run_id, combo_key, time.strftime("%Y-%m-%dT%H:%M:%S"), plan, WEIGHT_MODE, optimizer_mode, BUDGET_MODE,
                         CALIBRATION_SEQUENCE, GROUPING_MODE, "success" if res_success else "failed", final_score, 0, 0, 0,
                         "True" if final_score < 999.0 else "False", train_score, valid_score, all_score,
+                        train_wcs, valid_wcs, all_wcs,
                         yield_tr_nrmse, yield_tr_bias, yield_val_nrmse, yield_val_bias,
                         time.time() - OPTIMIZATION_STARTED_AT, str(bool(VALID_TRTS)), str(TRAIN_TRTS), str(VALID_TRTS), str(CASE_DIR),
                         EVAL_RUN_COUNTER, int(run_model_stats["run_model_invocations"]), int(run_model_stats["dssat_treatment_calls"]), run_model_stats["dssat_wall_sec"]
