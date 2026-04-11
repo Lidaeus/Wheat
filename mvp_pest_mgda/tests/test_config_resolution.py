@@ -3787,6 +3787,56 @@ class TestCaseRuntimeResolution(unittest.TestCase):
             self.assertEqual(tokens[9], "80.000")
             self.assertEqual(tokens[10], "128.05")
 
+    def test_rewrite_cul_values_rice_updates_numeric_tail_without_corrupting_row(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cul_path = Path(tmp) / "RICER048.CUL"
+            cul_path.write_text(
+                "".join(
+                    [
+                        "*CULTIVARS:RICER048\n",
+                        "@VAR#  VAR-NAME........ EXPNO   ECO#    P1   P2R    P5   P2O    G1    G2    G3 PHINT  THOT TCLDP TCLDF\n",
+                        "IB0020 RD 23                .    693  36.0 466.2   3.7 64.33  0.03 0.300  0.55  1.00  29.0  15.0  15.0\n",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            dssat_io.rewrite_cul_values(
+                cul_path,
+                "IB0020",
+                {"P1": 700, "P2R": 40.0, "P5": 500.0, "P2O": 5.0, "G1": 60.00, "G2": 0.04, "G3": 0.321, "G4": 0.66},
+            )
+
+            row = next(line for line in cul_path.read_text(encoding="utf-8").splitlines() if line.startswith("IB0020"))
+            tokens = row.split()
+            tail = tokens[-12:]
+            self.assertEqual(tail[0], "700")
+            self.assertEqual(tail[1], "40.0")
+            self.assertEqual(tail[2], "500.0")
+            self.assertEqual(tail[3], "5.0")
+            self.assertEqual(tail[4], "60.00")
+            self.assertEqual(tail[5], "0.04")
+            self.assertEqual(tail[6], "0.321")
+            self.assertEqual(tail[7], "0.66")
+
+    def test_rewrite_cul_values_maize_does_not_use_tail_token_fallback_for_standard_row(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cul_path = Path(tmp) / "MZCER048.CUL"
+            cul_path.write_text(
+                "".join(
+                    [
+                        "*CULTIVARS:MZCER048\n",
+                        "@VAR#  VRNAME.......... EXPNO   ECO#     P1     P2     P5     G2     G3  PHINT\n",
+                        "IB0035 McCurdy 84aa         . MZEC001   228    1.00   789   619   10.75    55\n",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            dssat_io.rewrite_cul_values(cul_path, "IB0035", {"P1": 228.0})
+            row = next(line for line in cul_path.read_text(encoding="utf-8").splitlines() if line.startswith("IB0035"))
+            self.assertIn("228", row)
+
     def test_ensure_case_files_writes_registry_parameter_order_into_params_and_tpl(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

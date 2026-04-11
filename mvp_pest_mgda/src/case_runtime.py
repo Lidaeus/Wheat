@@ -397,7 +397,9 @@ def ensure_local_runtime(
             shutil.copy2(src_dssatpro, dst_dssatpro)
 
     base_name = cul_path.stem
-    for suffix in (".CUL", ".ECO", ".SPE"):
+    required_suffixes = [".CUL", ".SPE"]
+    optional_suffixes = {".ECO"}
+    for suffix in [*required_suffixes, *sorted(optional_suffixes)]:
         target = runtime_genotype / f"{base_name}{suffix}"
         file_name = f"{base_name}{suffix}"
         src_candidate = next(
@@ -409,11 +411,10 @@ def ensure_local_runtime(
             None,
         )
         if src_candidate is None:
+            if suffix in optional_suffixes:
+                continue
             searched = [str(p) for p in candidate_genotype_sources(project_root, dssat_dir, base_name, suffix, cul_path)]
-            raise FileNotFoundError(
-                f"Missing genotype support file '{file_name}'. "
-                f"Searched={searched}"
-            )
+            raise FileNotFoundError(f"Missing genotype support file '{file_name}'. Searched={searched}")
         need_copy = True
         if target.exists():
             try:
