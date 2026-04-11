@@ -2123,6 +2123,9 @@ def main():
         train_wcs = float("nan")
         valid_wcs = float("nan")
         all_wcs = float("nan")
+        train_primary_score = float("nan")
+        valid_primary_score = float("nan")
+        all_primary_score = float("nan")
     else:
         metrics = comparable_evaluation_metrics()
         train_score = score_metrics(final_sim_metrics, metrics, "train")
@@ -2136,6 +2139,9 @@ def main():
         train_wcs = float(aggregate_values.get("TRAIN_WCS", float("nan")))
         valid_wcs = float(aggregate_values.get("VALID_WCS", float("nan")))
         all_wcs = float(aggregate_values.get("ALL_WCS", float("nan")))
+        train_primary_score = float(aggregate_values.get("TRAIN_PRIMARY_SCORE", float("nan")))
+        valid_primary_score = float(aggregate_values.get("VALID_PRIMARY_SCORE", float("nan")))
+        all_primary_score = float(aggregate_values.get("ALL_PRIMARY_SCORE", float("nan")))
         final_score = valid_score if VALID_TRTS else all_score
 
     print(f"Optimization Success: {res_success}")
@@ -2149,6 +2155,18 @@ def main():
     print(f"TRAIN_MEAN_NRMSE: {train_score:.6f}")
     print(f"VALID_MEAN_NRMSE: {valid_score:.6f}")
     print(f"ALL_MEAN_NRMSE: {all_score:.6f}")
+    if np.isfinite(train_wcs):
+        print(f"TRAIN_WCS: {train_wcs:.6f}")
+    if np.isfinite(valid_wcs):
+        print(f"VALID_WCS: {valid_wcs:.6f}")
+    if np.isfinite(all_wcs):
+        print(f"ALL_WCS: {all_wcs:.6f}")
+    if np.isfinite(train_primary_score):
+        print(f"TRAIN_PRIMARY_SCORE: {train_primary_score:.6f}")
+    if np.isfinite(valid_primary_score):
+        print(f"VALID_PRIMARY_SCORE: {valid_primary_score:.6f}")
+    if np.isfinite(all_primary_score):
+        print(f"ALL_PRIMARY_SCORE: {all_primary_score:.6f}")
     if result_schema_view is not None:
         comparable_metrics = comparable_evaluation_metrics()
         print(f"Comparable_Metrics: {','.join(metric.upper() for metric in comparable_metrics)}")
@@ -2184,6 +2202,7 @@ def main():
             AGGREGATE_METRIC_EXPORT_FIELDNAMES,
             TREATMENT_METRIC_EXPORT_FIELDNAMES
         )
+        from mvp_pest_mgda.src.calibration_core.pest_runner import export_posterior_diagnostics, resolve_ies_iteration
         import csv
         
         context = build_experiment_export_context(
@@ -2227,7 +2246,9 @@ def main():
                         CALIBRATION_SEQUENCE, GROUPING_MODE, "success" if res_success else "failed", final_score, 0, 0, 0,
                         "True" if final_score < 999.0 else "False", train_score, valid_score, all_score,
                         train_wcs, valid_wcs, all_wcs,
+                        train_primary_score, valid_primary_score, all_primary_score,
                         yield_tr_nrmse, yield_tr_bias, yield_val_nrmse, yield_val_bias,
+                        float(res_fun),
                         time.time() - OPTIMIZATION_STARTED_AT, str(bool(VALID_TRTS)), str(TRAIN_TRTS), str(VALID_TRTS), str(CASE_DIR),
                         EVAL_RUN_COUNTER, int(run_model_stats["run_model_invocations"]), int(run_model_stats["dssat_treatment_calls"]), run_model_stats["dssat_wall_sec"]
                     ])
@@ -2272,6 +2293,90 @@ def main():
                                 row.observed, row.simulated, row.error, row.abs_error, row.relative_error,
                                 agg_row.count, agg_row.nrmse, agg_row.bias
                             ])
+
+                if optimizer_mode == "ies":
+                    try:
+                        iter_idx = resolve_ies_iteration(Path(RUNTIME_DIR), stem="ksas_mvp")
+                        ies_root = output_root / "phase1_ies_posterior" / run_id
+                        bounds_map = {
+                            str(name).strip().lower(): (float(b[0]), float(b[1]))
+                            for name, b in zip(PARAM_NAMES, BOUNDS)
+                        }
+                        prior_map = {
+                            str(name).strip().lower(): float(val)
+                            for name, val in zip(PARAM_NAMES, INITIAL_GUESS)
+                        }
+                        artifacts = export_posterior_diagnostics(
+                            work_dir=Path(RUNTIME_DIR),
+                            prior_params=prior_map,
+                            prior_bounds=bounds_map,
+                            parameter_order=PARAM_NAMES,
+                            stem="ksas_mvp",
+                            iteration=int(iter_idx),
+                            output_dir=ies_root,
+                        )
+                        posterior_global = output_root / "phase1_posterior_summary.tsv"
+                        if not posterior_global.exists():
+                            with posterior_global.open("w", encoding="utf-8", newline="") as handle:
+                                csv.writer(handle, delimiter="\t").writerow(
+                                    [
+                                        "run_id",
+                                        "combo_key",
+                                        "plan",
+                                        "weight",
+                                        "engine",
+                                        "budget",
+                                        "sequence",
+                                        "grouping",
+                                        "status",
+                                        "iteration",
+                                        "parameter",
+                                        "group",
+                                        "prior",
+                                        "best",
+                                        "prior_lower",
+                                        "prior_upper",
+                                        "posterior_mean",
+                                        "posterior_std",
+                                        "posterior_p05",
+                                        "posterior_p50",
+                                        "posterior_p95",
+                                    ]
+                                )
+                        summary_csv = artifacts.get("summary_csv")
+                        if summary_csv and summary_csv.exists():
+                            with summary_csv.open("r", encoding="utf-8", newline="") as handle:
+                                rows = list(csv.DictReader(handle))
+                            with posterior_global.open("a", encoding="utf-8", newline="") as handle:
+                                writer = csv.writer(handle, delimiter="\t")
+                                for row in rows:
+                                    writer.writerow(
+                                        [
+                                            run_id,
+                                            combo_key,
+                                            plan,
+                                            WEIGHT_MODE,
+                                            optimizer_mode,
+                                            BUDGET_MODE,
+                                            CALIBRATION_SEQUENCE,
+                                            GROUPING_MODE,
+                                            "success" if res_success else "failed",
+                                            int(iter_idx),
+                                            str(row.get("parameter", "")).strip(),
+                                            str(row.get("group", "")).strip(),
+                                            str(row.get("prior", "")).strip(),
+                                            str(row.get("best", "")).strip(),
+                                            str(row.get("prior_lower", "")).strip(),
+                                            str(row.get("prior_upper", "")).strip(),
+                                            str(row.get("posterior_mean", "")).strip(),
+                                            str(row.get("posterior_std", "")).strip(),
+                                            str(row.get("posterior_p05", "")).strip(),
+                                            str(row.get("posterior_p50", "")).strip(),
+                                            str(row.get("posterior_p95", "")).strip(),
+                                        ]
+                                    )
+                    except Exception:
+                        pass
                             
             param_path = output_root / "phase1_parameters.tsv"
             if param_path.exists():

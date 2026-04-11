@@ -46,6 +46,7 @@ class AggregateView:
     split: str
     mean_nrmse: float
     wcs: float
+    primary_score: float
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,9 @@ class MatrixSummaryView:
     train_wcs: float
     valid_wcs: float
     all_wcs: float
+    train_primary_score: float
+    valid_primary_score: float
+    all_primary_score: float
     train_primary_nrmse: float
     train_primary_bias: float
     valid_primary_nrmse: float
@@ -560,6 +564,8 @@ def build_evaluation_result(
         metric_scores: list[float] = []
         wcs_num = 0.0
         wcs_den = 0.0
+        primary_num = 0.0
+        primary_den = 0.0
         split_trts = _split_trts(normalized_metrics, split_by_trt, split)
         for metric in comparable:
             obs_values: list[float] = []
@@ -587,6 +593,9 @@ def build_evaluation_result(
             if w > 0.0 and math.isfinite(float(wcs)):
                 wcs_num += w * float(wcs)
                 wcs_den += w
+            if w > 0.0 and math.isfinite(float(nrmse)):
+                primary_num += w * float(nrmse)
+                primary_den += w
             aggregate_metrics.append(
                 AggregateMetricRecord(
                     split=split,
@@ -604,7 +613,8 @@ def build_evaluation_result(
             )
         mean_nrmse = float(_safe_mean(metric_scores)) if metric_scores else 999.0
         split_wcs = float(wcs_num / wcs_den) if wcs_den > 0.0 else float("nan")
-        aggregate_views[split] = AggregateView(split=split, mean_nrmse=mean_nrmse, wcs=split_wcs)
+        primary_score = float(primary_num / primary_den) if primary_den > 0.0 else float("nan")
+        aggregate_views[split] = AggregateView(split=split, mean_nrmse=mean_nrmse, wcs=split_wcs, primary_score=primary_score)
     return EvaluationResult(
         metrics_by_trt=normalized_metrics,
         aggregate_views=aggregate_views,
@@ -960,6 +970,9 @@ def iter_aggregate_value_records(result: EvaluationResult) -> list[PestOutputRec
         if view is not None:
             records.append(PestOutputRecord(name=build_split_mean_name(split), value=float(view.mean_nrmse)))
             records.append(PestOutputRecord(name=build_split_score_name(split, "WCS"), value=float(view.wcs)))
+            records.append(
+                PestOutputRecord(name=build_split_score_name(split, "PRIMARY_SCORE"), value=float(view.primary_score))
+            )
     for metric_record in result.aggregate_metrics:
         records.append(
             PestOutputRecord(
@@ -1036,6 +1049,9 @@ def build_matrix_summary_view(result: EvaluationResult, primary_metric: str) -> 
         train_wcs=resolve_aggregate_value(result, build_split_score_name("train", "WCS")),
         valid_wcs=resolve_aggregate_value(result, build_split_score_name("valid", "WCS")),
         all_wcs=resolve_aggregate_value(result, build_split_score_name("all", "WCS")),
+        train_primary_score=resolve_aggregate_value(result, build_split_score_name("train", "PRIMARY_SCORE")),
+        valid_primary_score=resolve_aggregate_value(result, build_split_score_name("valid", "PRIMARY_SCORE")),
+        all_primary_score=resolve_aggregate_value(result, build_split_score_name("all", "PRIMARY_SCORE")),
         train_primary_nrmse=resolve_aggregate_value(result, build_split_metric_name("train", metric, "NRMSE")),
         train_primary_bias=resolve_aggregate_value(result, build_split_metric_name("train", metric, "BIAS")),
         valid_primary_nrmse=resolve_aggregate_value(result, build_split_metric_name("valid", metric, "NRMSE")),
@@ -1061,7 +1077,12 @@ def serialize_evaluation_result(result: EvaluationResult) -> dict:
             for trt, metrics in result.metrics_by_trt.items()
         },
         "aggregate_views": {
-            split: {"split": view.split, "mean_nrmse": float(view.mean_nrmse), "wcs": float(view.wcs)}
+            split: {
+                "split": view.split,
+                "mean_nrmse": float(view.mean_nrmse),
+                "wcs": float(view.wcs),
+                "primary_score": float(view.primary_score),
+            }
             for split, view in result.aggregate_views.items()
         },
         "aggregate_metrics": [
@@ -1090,6 +1111,7 @@ def deserialize_evaluation_result(payload: dict) -> EvaluationResult:
             split=str(item.get("split", split)),
             mean_nrmse=float(item.get("mean_nrmse", float("nan"))),
             wcs=float(item.get("wcs", float("nan"))),
+            primary_score=float(item.get("primary_score", float("nan"))),
         )
         for split, item in dict(payload.get("aggregate_views", {})).items()
     }

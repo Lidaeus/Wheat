@@ -171,7 +171,9 @@ SUMMARY_FIELDS = [
     "sequence", "grouping", "status", "score", "delta_vs_b0", "delta_vs_b1", "delta_vs_negative_ref",
     "better_than_b0", "train_mean_nrmse", "valid_mean_nrmse", "all_mean_nrmse",
     "train_wcs", "valid_wcs", "all_wcs",
+    "train_primary_score", "valid_primary_score", "all_primary_score",
     "train_yield_nrmse", "train_yield_bias", "valid_yield_nrmse", "valid_yield_bias",
+    "optimizer_loss",
     "duration_sec", "validation_enabled", "train_trts", "valid_trts", "workspace_dir",
     "eval_call_count", "run_model_invocations", "dssat_treatment_calls", "dssat_wall_sec",
 ]
